@@ -77,9 +77,10 @@ def main(argv: list[str]) -> int:
     run_dir = Path(argv[2])
     harbor_rc = int(argv[3])
     env_values = _load_eval_env(Path("evaluator") / "eval.env")
+    reward_schema = env_values.get("EVOLVE_REWARD_SCHEMA", "scalar")
     expected_trials = _expected_trials(run_dir, env_values)
-    rewards = write_harbor_artifacts(jobs_dir, run_dir)
-    if not rewards:
+    rewards = write_harbor_artifacts(jobs_dir, run_dir, reward_schema=reward_schema)
+    if not rewards and reward_schema == "scalar":
         for reward_path in sorted(jobs_dir.rglob("verifier/reward.txt")) if jobs_dir.exists() else []:
             try:
                 rewards.append(float(reward_path.read_text().strip()))

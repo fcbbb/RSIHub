@@ -35,6 +35,52 @@ def write_trial(
     (path / "result.json").write_text(json.dumps(payload))
 
 
+def write_reviewbench_trial(
+    path: Path,
+    *,
+    task: str,
+    trial: str,
+    counts: dict[str, int] | None,
+    exception_type: str | None = None,
+) -> None:
+    path.mkdir(parents=True)
+    rewards = None
+    if counts is not None:
+        rewards = {"rb_schema": 1, "rb_task": 1, "rb_evaluation": 1}
+        rewards.update({f"overall.{field}": value for field, value in counts.items()})
+        rewards["by_severity.major.candidate_count"] = 1
+    payload = {
+        "task_name": task,
+        "trial_name": trial,
+        "verifier_result": {"rewards": rewards} if rewards is not None else None,
+        "exception_info": (
+            {"exception_type": exception_type, "exception_message": "fixture failure"} if exception_type else None
+        ),
+        "agent_result": {"cost_usd": 0.0},
+    }
+    (path / "result.json").write_text(json.dumps(payload))
+
+
+def _counts(
+    *,
+    candidate: int,
+    matched_tp: int,
+    golden_tp: int,
+    golden_covered: int,
+) -> dict[str, int]:
+    matched = candidate
+    return {
+        "candidate_count": candidate,
+        "golden_tp_count": golden_tp,
+        "matched_count": matched,
+        "matched_tp_count": matched_tp,
+        "unmatched_count": candidate - matched,
+        "unmatched_tp_count": 0,
+        "unmatched_fp_count": 0,
+        "golden_covered_count": golden_covered,
+    }
+
+
 def write_job_config(jobs: Path, *, max_retries: int, excluded: list[str] | None = None) -> None:
     job = jobs / "job"
     job.mkdir(parents=True, exist_ok=True)
@@ -489,3 +535,103 @@ def test_write_harbor_artifacts_derives_safe_verifier_diagnostics(tmp_path: Path
     assert "case-a__one/verifier/result.json" not in indexed_paths
     assert "case-a__one/result.json" not in indexed_paths
     assert "ground-truth-secret" not in json.dumps(replay_envelope)
+
+
+def test_reviewbench_schema_scores_augmented_f1(tmp_path: Path) -> None:
+    jobs = tmp_path / "jobs"
+    write_reviewbench_trial(
+        jobs / "case-a__one",
+        task="case-a",
+        trial="one",
+        counts=_counts(candidate=4, matched_tp=1, golden_tp=4, golden_covered=1),
+    )
+
+    vector, _artifacts, rewards = collect_harbor_artifacts(jobs, reward_schema="reviewbench")
+
+    trial = vector["tasks"]["case-a"]["trials"][0]
+    assert trial["status"] == "benchmark_complete"
+    assert trial["owner"] == "benchmark"
+    assert trial["reward"] == 0.25
+    assert rewards == [0.25]
+
+
+def test_reviewbench_imputes_undefined_prs_with_defined_mean(tmp_path: Path) -> None:
+    jobs = tmp_path / "jobs"
+    write_reviewbench_trial(
+        jobs / "case-a__one",
+        task="case-a",
+        trial="one",
+        counts=_counts(candidate=4, matched_tp=1, golden_tp=4, golden_covered=1),
+    )
+    write_reviewbench_trial(
+        jobs / "case-b__one",
+        task="case-b",
+        trial="one",
+        counts=_counts(candidate=0, matched_tp=0, golden_tp=0, golden_covered=0),
+    )
+    write_reviewbench_trial(
+        jobs / "case-c__one",
+        task="case-c",
+        trial="one",
+        counts=_counts(candidate=1, matched_tp=1, golden_tp=1, golden_covered=1),
+    )
+
+    vector, _artifacts, rewards = collect_harbor_artifacts(jobs, reward_schema="reviewbench")
+
+    imputed = vector["tasks"]["case-b"]["trials"][0]
+    assert imputed["status"] == "benchmark_complete"
+    assert imputed["reward"] == 0.625
+    assert imputed["reward_imputed"] is True
+    # RSIHub's mean equals ReviewBench's macro over the defined PRs.
+    assert sum(rewards) / len(rewards) == 0.625
+
+
+def test_reviewbench_without_any_defined_pr_fails_infrastructure(tmp_path: Path) -> None:
+    jobs = tmp_path / "jobs"
+    write_reviewbench_trial(
+        jobs / "case-a__one",
+        task="case-a",
+        trial="one",
+        counts=_counts(candidate=0, matched_tp=0, golden_tp=0, golden_covered=0),
+    )
+
+    vector, _artifacts, rewards = collect_harbor_artifacts(jobs, reward_schema="reviewbench")
+
+    trial = vector["tasks"]["case-a"]["trials"][0]
+    assert trial["status"] == "infrastructure_failed"
+    assert trial["owner"] == "evaluator"
+    assert trial["exception_type"] == "ReviewBenchUndefinedMetric"
+    assert rewards == []
+
+
+def test_reviewbench_rejects_inconsistent_counts_as_infrastructure(tmp_path: Path) -> None:
+    jobs = tmp_path / "jobs"
+    counts = _counts(candidate=2, matched_tp=2, golden_tp=2, golden_covered=2)
+    counts["matched_tp_count"] = 3
+    write_reviewbench_trial(jobs / "case-a__one", task="case-a", trial="one", counts=counts)
+
+    vector, _artifacts, rewards = collect_harbor_artifacts(jobs, reward_schema="reviewbench")
+
+    trial = vector["tasks"]["case-a"]["trials"][0]
+    assert trial["status"] == "infrastructure_failed"
+    assert trial["owner"] == "evaluator"
+    assert rewards == []
+
+
+def test_reviewbench_replay_envelope_preserves_metric_counts(tmp_path: Path) -> None:
+    jobs = tmp_path / "jobs"
+    trial_dir = jobs / "case-a__one"
+    write_reviewbench_trial(
+        trial_dir,
+        task="case-a",
+        trial="one",
+        counts=_counts(candidate=1, matched_tp=1, golden_tp=1, golden_covered=1),
+    )
+
+    write_harbor_artifacts(jobs, tmp_path / "run", reward_schema="reviewbench")
+
+    envelope = json.loads((trial_dir / "evolve-replay.json").read_text())
+    rewards = envelope["verifier_result"]["rewards"]
+    assert rewards["rb_schema"] == 1
+    assert rewards["overall.candidate_count"] == 1
+    assert rewards["by_severity.major.candidate_count"] == 1

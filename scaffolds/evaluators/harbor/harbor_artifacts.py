@@ -55,15 +55,17 @@ def candidate_error_code(exception_info: object) -> str | None:
     return code if _SAFE_ERROR_CODE.fullmatch(code) else "candidate_invalid"
 
 
-def collect_harbor_artifacts(jobs_dir: Path) -> tuple[dict[str, Any], dict[str, Any], list[float]]:
-    trials = _load_task_trials(jobs_dir)
+def collect_harbor_artifacts(
+    jobs_dir: Path, *, reward_schema: str = "scalar"
+) -> tuple[dict[str, Any], dict[str, Any], list[float]]:
+    trials = _load_task_trials(jobs_dir, reward_schema=reward_schema)
     return _build_task_vector(trials), _build_artifact_index(jobs_dir, trials), _scoring_rewards(trials)
 
 
-def write_harbor_artifacts(jobs_dir: Path, run_dir: Path) -> list[float]:
+def write_harbor_artifacts(jobs_dir: Path, run_dir: Path, *, reward_schema: str = "scalar") -> list[float]:
     _write_verifier_diagnostics(jobs_dir)
-    _write_replay_envelopes(jobs_dir)
-    task_vector, artifact_index, rewards = collect_harbor_artifacts(jobs_dir)
+    _write_replay_envelopes(jobs_dir, reward_schema=reward_schema)
+    task_vector, artifact_index, rewards = collect_harbor_artifacts(jobs_dir, reward_schema=reward_schema)
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "task_vector.json").write_text(json.dumps(task_vector, indent=2, sort_keys=True) + "\n")
     (run_dir / "evaluation_artifacts.json").write_text(json.dumps(artifact_index, indent=2, sort_keys=True) + "\n")
@@ -73,7 +75,7 @@ def write_harbor_artifacts(jobs_dir: Path, run_dir: Path) -> list[float]:
     return rewards
 
 
-def _write_replay_envelopes(jobs_dir: Path) -> None:
+def _write_replay_envelopes(jobs_dir: Path, *, reward_schema: str = "scalar") -> None:
     """Project raw Harbor results onto the only verifier-safe replay boundary."""
     for result_path in sorted(jobs_dir.rglob("result.json")):
         try:
@@ -86,9 +88,14 @@ def _write_replay_envelopes(jobs_dir: Path) -> None:
         if not isinstance(task_name, str) or not isinstance(trial_name, str):
             continue
         envelope: dict[str, Any] = {"schema_version": 1, "task_name": task_name, "trial_name": trial_name}
-        reward = _reward(result)
-        if reward is not None:
-            envelope["verifier_result"] = {"rewards": {"reward": reward}}
+        if reward_schema == "reviewbench":
+            reviewbench_reward = _reviewbench_reward(result)
+            if reviewbench_reward is not None:
+                envelope["verifier_result"] = {"rewards": reviewbench_reward}
+        else:
+            reward = _reward(result)
+            if reward is not None:
+                envelope["verifier_result"] = {"rewards": {"reward": reward}}
         exception = result.get("exception_info")
         if isinstance(exception, dict):
             safe_exception = {
@@ -243,7 +250,97 @@ def _write_verifier_diagnostics(jobs_dir: Path) -> None:
         output.write_text(json.dumps(diagnostics, indent=2, sort_keys=True) + "\n")
 
 
-def _load_task_trials(jobs_dir: Path) -> list[dict[str, Any]]:
+_REVIEWBENCH_COUNT_FIELDS = (
+    "candidate_count",
+    "golden_tp_count",
+    "matched_count",
+    "matched_tp_count",
+    "unmatched_count",
+    "unmatched_tp_count",
+    "unmatched_fp_count",
+    "golden_covered_count",
+)
+
+
+def _reviewbench_overall(reward: object) -> dict[str, int] | None:
+    """Validate ReviewBench counts and return the ``overall`` stratum."""
+    if not isinstance(reward, dict) or reward.get("rb_schema") != 1:
+        return None
+    counts: dict[str, int] = {}
+    for field in _REVIEWBENCH_COUNT_FIELDS:
+        value = reward.get(f"overall.{field}")
+        if (
+            type(value) not in (int, float)
+            or not 0 <= value <= 2**53 - 1
+            or value != int(value)
+        ):
+            return None
+        counts[field] = int(value)
+    if (
+        counts["candidate_count"] != counts["matched_count"] + counts["unmatched_count"]
+        or counts["unmatched_count"] != counts["unmatched_tp_count"] + counts["unmatched_fp_count"]
+        or counts["matched_tp_count"] > counts["matched_count"]
+        or counts["golden_covered_count"] > counts["golden_tp_count"]
+    ):
+        return None
+    return counts
+
+
+def _reviewbench_reward(result: dict[str, Any]) -> dict[str, Any] | None:
+    rewards = (result.get("verifier_result") or {}).get("rewards")
+    return rewards if _reviewbench_overall(rewards) is not None else None
+
+
+def _reviewbench_f1(counts: dict[str, int]) -> float | None:
+    """Mirror ReviewBench's augmented F1; None means the PR is undefined."""
+    precision_denominator = counts["candidate_count"]
+    recall_denominator = counts["golden_tp_count"] + counts["unmatched_tp_count"]
+    precision = (
+        (counts["matched_tp_count"] + counts["unmatched_tp_count"]) / precision_denominator
+        if precision_denominator
+        else None
+    )
+    recall = (
+        (counts["golden_covered_count"] + counts["unmatched_tp_count"]) / recall_denominator
+        if recall_denominator
+        else None
+    )
+    if precision is None or recall is None:
+        return None
+    return 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+
+
+def _has_scoring_reward(result: dict[str, Any], reward_schema: str) -> bool:
+    if reward_schema == "reviewbench":
+        return _reviewbench_reward(result) is not None
+    return (_reward(result) or 0.0) > 0.0
+
+
+def _impute_reviewbench_rewards(trials: list[dict[str, Any]]) -> None:
+    """Make RSIHub's mean equal ReviewBench's macro augmented F1.
+
+    Undefined PRs are replaced by the mean of the defined PRs in the same
+    evaluation.  The identity holds because the denominator (all trials) is
+    unchanged: (sum_defined + undefined * mean) / total == mean.
+    """
+    completed = [trial for trial in trials if trial["status"] == "benchmark_complete"]
+    defined = [float(trial["reward"]) for trial in completed if trial["reward"] is not None]
+    if not defined:
+        for trial in completed:
+            trial["status"] = "infrastructure_failed"
+            trial["reward"] = None
+            trial["owner"] = "evaluator"
+            trial["exception_type"] = "ReviewBenchUndefinedMetric"
+            trial["exception_message"] = "no PR has a defined augmented F1"
+        return
+    mean = sum(defined) / len(defined)
+    for trial in completed:
+        if trial["reward"] is None:
+            trial["reward"] = mean
+            trial["reward_imputed"] = True
+
+
+def _load_task_trials(jobs_dir: Path, *, reward_schema: str = "scalar") -> list[dict[str, Any]]:
     if not jobs_dir.exists():
         return []
     verifier_timeout_is_final_zero = _verifier_timeout_is_final_zero(jobs_dir)
@@ -260,11 +357,14 @@ def _load_task_trials(jobs_dir: Path) -> list[dict[str, Any]]:
         if not isinstance(task_name, str) or not isinstance(trial_name, str):
             continue
         trial_dir = result_path.parent
-        verifier_dependency_error = None if (_reward(result) or 0.0) > 0.0 else _verifier_dependency_error(trial_dir)
+        verifier_dependency_error = (
+            None if _has_scoring_reward(result, reward_schema) else _verifier_dependency_error(trial_dir)
+        )
         status, reward, owner = _trial_result(
             result,
             verifier_timeout_is_final_zero=verifier_timeout_is_final_zero,
             verifier_dependency_error=verifier_dependency_error,
+            reward_schema=reward_schema,
         )
         if status == "timeout" and owner == "benchmark_agent" and _network_only_timeout(trial_dir):
             status, reward, owner = "infrastructure_failed", None, "agent_runtime"
@@ -293,6 +393,8 @@ def _load_task_trials(jobs_dir: Path) -> list[dict[str, Any]]:
                 "artifacts": _safe_artifacts(jobs_dir, trial_dir),
             }
         )
+    if reward_schema == "reviewbench":
+        _impute_reviewbench_rewards(trials)
     return sorted(trials, key=lambda trial: (str(trial["task_name"]), str(trial["trial_name"])))
 
 
@@ -314,6 +416,8 @@ def _build_task_vector(trials: list[dict[str, Any]]) -> dict[str, Any]:
                 serialized["exception_type"] = entry["exception_type"]
             if entry["exception_message"] is not None:
                 serialized["exception_message"] = entry["exception_message"]
+            if entry.get("reward_imputed"):
+                serialized["reward_imputed"] = True
             serialized_trials.append(serialized)
         serialized_tasks[task_name] = {"trials": serialized_trials}
     return {"schema_version": 1, "tasks": serialized_tasks}
@@ -394,6 +498,7 @@ def _trial_result(
     *,
     verifier_timeout_is_final_zero: bool,
     verifier_dependency_error: str | None = None,
+    reward_schema: str = "scalar",
 ) -> tuple[str, float | None, str]:
     if verifier_dependency_error:
         return "infrastructure_failed", None, "evaluator"
@@ -411,6 +516,13 @@ def _trial_result(
         if candidate_error_code(exception):
             return "candidate_invalid", None, "candidate"
         return "infrastructure_failed", None, "ambiguous"
+    if reward_schema == "reviewbench":
+        reviewbench_reward = _reviewbench_reward(result)
+        if reviewbench_reward is None:
+            return "infrastructure_failed", None, "evaluator"
+        counts = _reviewbench_overall(reviewbench_reward)
+        assert counts is not None
+        return "benchmark_complete", _reviewbench_f1(counts), "benchmark"
     reward = _reward(result)
     if reward is not None:
         return "benchmark_complete", reward, "benchmark"

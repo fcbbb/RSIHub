@@ -168,6 +168,68 @@ def test_init_real_harbor_recipe_requires_evaluator_agent(tmp_path: Path) -> Non
         init_workspace_from_config(InitOptions(workspace=tmp_path / "w"), config)
 
 
+def test_eval_env_omits_reward_schema_by_default() -> None:
+    env = _eval_env(
+        "exp",
+        "terminal-bench-2",
+        n_concurrent=1,
+        tasks_per_round=1,
+        trials=1,
+        partial_floor=0.9,
+        agent="custom:Agent",
+    )
+
+    assert "EVOLVE_REWARD_SCHEMA" not in env
+
+
+def test_eval_env_freezes_reviewbench_reward_schema() -> None:
+    env = _eval_env(
+        "exp",
+        "reviewbench-test",
+        n_concurrent=1,
+        tasks_per_round=1,
+        trials=1,
+        partial_floor=1.0,
+        agent="custom:Agent",
+        reward_schema="reviewbench",
+    )
+
+    assert "EVOLVE_REWARD_SCHEMA=reviewbench\n" in env
+
+
+def _reviewbench_config() -> dict:
+    config = fixture_recipe_config("hill_climb-smoke", "reviewbench")
+    config["evaluator"]["reward_schema"] = "reviewbench"
+    config["evaluator"]["partial_floor"] = 1.0
+    return config
+
+
+def test_init_accepts_reviewbench_reward_schema(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+
+    init_workspace_from_config(InitOptions(workspace=workspace), _reviewbench_config())
+
+    assert "EVOLVE_REWARD_SCHEMA=reviewbench\n" in (workspace / "evaluator" / "eval.env").read_text()
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (lambda config: config["evaluator"].update(reward_schema="unknown"), "must be 'scalar' or 'reviewbench'"),
+        (lambda config: config["evaluator"].update(k=2, repetitions=2), "requires evaluator.repetitions: 1"),
+        (lambda config: config["evaluator"].update(partial_floor=0.9), "requires evaluator.partial_floor: 1.0"),
+    ],
+)
+def test_init_rejects_invalid_reviewbench_reward_schema(
+    tmp_path: Path, mutate, message: str
+) -> None:
+    config = _reviewbench_config()
+    mutate(config)
+
+    with pytest.raises(ValueError, match=message):
+        init_workspace_from_config(InitOptions(workspace=tmp_path / "w"), config)
+
+
 def test_init_writes_recipe_harbor_agent_to_eval_env(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
 

@@ -281,6 +281,7 @@ def _write_files(
             agent_timeout_multiplier=agent_timeout_multiplier,
             verifier_timeout_multiplier=verifier_timeout_multiplier,
             max_retries=max_retries,
+            reward_schema=str(evaluator.get("reward_schema", "scalar")),
         ),
         "evaluator/agent.env": _agent_env(evaluator.get("agent_env")),
         "evaluator/verifier.env": _agent_env(evaluator.get("verifier_env")),
@@ -410,6 +411,16 @@ def _validate_evaluator_config(evaluator: dict[str, Any]) -> None:
     _evaluator_scaffold(engine, "engine.sh")
     if engine == "harbor" and not evaluator.get("agent"):
         raise ValueError("evaluator.agent is required for harbor recipes")
+    reward_schema = str(evaluator.get("reward_schema", "scalar"))
+    if reward_schema not in {"scalar", "reviewbench"}:
+        raise ValueError("evaluator.reward_schema must be 'scalar' or 'reviewbench'")
+    if reward_schema == "reviewbench":
+        if engine != "harbor":
+            raise ValueError("evaluator.reward_schema=reviewbench requires the harbor engine")
+        if evaluator_repetitions(evaluator) != 1:
+            raise ValueError("evaluator.reward_schema=reviewbench requires evaluator.repetitions: 1")
+        if float(evaluator.get("partial_floor", 0.9)) != 1.0:
+            raise ValueError("evaluator.reward_schema=reviewbench requires evaluator.partial_floor: 1.0")
 
 
 def _validate_target_config(target: dict[str, Any]) -> None:
@@ -753,6 +764,7 @@ def _eval_env(
     agent_timeout_multiplier: float = 1,
     verifier_timeout_multiplier: float = 1,
     max_retries: int = 0,
+    reward_schema: str = "scalar",
 ) -> str:
     expected_trials = tasks_per_round * max(trials, 1)
     text = (
@@ -778,6 +790,8 @@ def _eval_env(
         text += f"EVOLVE_HARBOR_VERIFIER_TIMEOUT_MULTIPLIER={verifier_timeout_multiplier}\n"
     if max_retries > 0:
         text += f"EVOLVE_HARBOR_MAX_RETRIES={max_retries}\n"
+    if reward_schema != "scalar":
+        text += f"EVOLVE_REWARD_SCHEMA={reward_schema}\n"
     if model:
         text += f"EVOLVE_HARBOR_MODEL={shlex.quote(model)}\n"
     return text + (f"EVOLVE_HARBOR_TASK_FILE={shlex.quote(task_file)}\n" if task_file else "")

@@ -27,16 +27,29 @@ RECIPE=ahe
 ./scripts/run_recipe_demo.sh "$RECIPE"
 ```
 
-Supported values are `aevolve`, `ahe`, `ahe_codex`, `gepa`, `hill_climb`,
-`hill_climb_codex`, `hyperagents`, `hyperagents_codex`, and
-`hyperagents_dsh` (see its
-[recipe README](https://github.com/simple-agent-lab/RSIHub/blob/main/recipes/hyperagents_dsh/README.md)
-for the extra dsh SDK setup and the pre-experiment checklist: model pin / `gen/0`
-retag, expected_trials vs `tasks_per_round`, non-TTY docker-exec doctor probe,
-and Harbor vs `DSH_TASK_TIMEOUT_SEC`). Codex-capable
+Supported values are `aevolve`, `ahe`, `ahe_codex`, `ahe_dsh`, `gepa`,
+`hill_climb`, `hill_climb_codex`, `hyperagents`, `hyperagents_codex`, and
+`hyperagents_dsh` (see the
+[hyperagents_dsh README](https://github.com/simple-agent-lab/RSIHub/blob/main/recipes/hyperagents_dsh/README.md)
+for the extra host-side dsh SDK setup and the pre-experiment checklist, or the
+[ahe_dsh README](https://github.com/simple-agent-lab/RSIHub/blob/main/recipes/ahe_dsh/README.md)
+for the container-side candidate runtime plus container-side headless
+mutate/debugger split).
+Codex-capable
 profiles may use `CODEX_AUTH_JSON_PATH=/absolute/path/to/auth.json` instead of
 an API key. Use `WORKSPACE`, `TASKS`, `GENERATIONS`, `ENV_FILE`, or
-`EVOLVE_ASSET_DIR` to override launcher defaults. See the
+`EVOLVE_ASSET_DIR` to override launcher defaults.
+
+To run against a dataset other than the pinned Terminal-Bench subset, download
+it once into the shared asset root and point the launcher at it:
+
+```bash
+export EVOLVE_ASSET_ROOT=/srv/evolve-assets
+./scripts/fetch_dataset.sh swe-bench-verified@1.0
+DATASET_PATH=/srv/evolve-assets/swe-bench-verified-1.0 ./scripts/run_recipe_demo.sh "$RECIPE"
+```
+
+See the
 [recipe guide](https://github.com/simple-agent-lab/RSIHub/blob/main/recipes/README.md) and
 [operations guide](guides/operations.md) for the full configuration and
 recovery workflow.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -93,6 +94,27 @@ def test_preparer_rejects_missing_manifest_tasks(tmp_path: Path, monkeypatch) ->
 
     with pytest.raises(SystemExit, match="missing=task-b"):
         module.main([str(incomplete), str(tmp_path / "prepared")])
+
+
+def test_preparer_ignores_a_permissive_caller_umask(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "raw"
+    task = _task(source, "task-a", "A\n")
+    # The pinned modes are 644 files and 755 directories.
+    for path in (task, *task.rglob("*")):
+        path.chmod(0o755 if path.is_dir() else 0o644)
+    manifest = _manifest(tmp_path / "manifest.json", source, ["task-a"])
+    destination = tmp_path / "prepared"
+    module = _load_preparer()
+    monkeypatch.setattr(module, "MANIFEST_PATH", manifest)
+
+    previous = os.umask(0o002)
+    try:
+        assert module.main([str(source), str(destination)]) == 0
+    finally:
+        os.umask(previous)
+
+    assert (destination / "task-a").stat().st_mode & 0o022 == 0
+    assert (destination / "task-a" / "instruction.md").stat().st_mode & 0o022 == 0
 
 
 def test_preparer_never_overwrites_a_mismatched_destination(tmp_path: Path, monkeypatch) -> None:

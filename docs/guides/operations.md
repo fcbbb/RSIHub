@@ -76,8 +76,25 @@ the shared content-bound Terminal-Bench subset and selected recipe image with:
 ./scripts/run_recipe_demo.sh ahe
 ```
 
-To download the complete upstream Harbor dataset without preparing the pinned
-RSIHub subset, export it directly:
+To export any Harbor dataset for RSIHub, download it into the shared asset root:
+
+```bash
+export EVOLVE_ASSET_ROOT=/srv/evolve-assets
+./scripts/fetch_dataset.sh terminal-bench@2.0
+./scripts/fetch_dataset.sh swe-bench-verified@1.0 swe-bench
+```
+
+Each dataset lands in `$EVOLVE_ASSET_ROOT/<name>` (the name defaults to the
+dataset spec with `@` and `/` replaced by `-`); re-running reuses a verified
+directory instead of downloading again. Use it through the demo launcher or
+pass it to `evolve init` directly:
+
+```bash
+DATASET_PATH=/srv/evolve-assets/swe-bench ./scripts/run_recipe_demo.sh ahe_dsh
+uv run --frozen evolve init ./runs/x --recipe ahe_dsh --dataset /srv/evolve-assets/swe-bench
+```
+
+The equivalent raw Harbor export is:
 
 ```bash
 uv run --frozen harbor download terminal-bench@2.0 \

@@ -59,6 +59,9 @@ def _environment(fake_bin: Path, calls: Path, **values: str) -> dict[str, str]:
         {
             "PATH": f"{fake_bin}{os.pathsep}{environment['PATH']}",
             "UV_CALLS": str(calls),
+            # Keep the test hermetic: a real repository .env must not add
+            # --env-file to the recorded calls.
+            "ENV_FILE": str(calls.parent / "missing.env"),
             **values,
         }
     )

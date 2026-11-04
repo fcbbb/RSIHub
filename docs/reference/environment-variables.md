@@ -113,6 +113,8 @@ The repository launch scripts accept these user-facing overrides:
 | `GENERATIONS` | `1` | maximum generations requested by the demo runner |
 | `ENV_FILE` | repository `.env` | environment file loaded by `run_recipe_demo.sh` |
 | `EVOLVE_ASSET_DIR` | `.evolve-assets/terminal-bench-2.0` | reusable dataset and prepared subset location |
+| `EVOLVE_ASSET_ROOT` | `<repo>/.evolve-assets` | shared root where `fetch_dataset.sh` stores one directory per dataset |
+| `DATASET_PATH` | unset | use this local Harbor task directory and skip the pinned Terminal-Bench subset |
 
 Example:
 
@@ -124,6 +126,28 @@ ENV_FILE="$PWD/.env" \
 EVOLVE_ASSET_DIR=/data/evolve-assets \
   ./scripts/run_recipe_demo.sh gepa
 ```
+
+## Datasets other than the pinned Terminal-Bench subset
+
+`fetch_dataset.sh` downloads any Harbor registry dataset into a shared asset
+root (`EVOLVE_ASSET_ROOT`), one directory per dataset. Re-running against an
+existing directory validates and reuses it, so several users can share the
+download.
+
+```bash
+export EVOLVE_ASSET_ROOT=/srv/evolve-assets
+
+./scripts/fetch_dataset.sh terminal-bench@2.0
+./scripts/fetch_dataset.sh swe-bench-verified@1.0 swe-bench
+
+DATASET_PATH=/srv/evolve-assets/swe-bench \
+  ./scripts/run_recipe_demo.sh ahe_dsh
+```
+
+`DATASET_PATH` is passed to `evolve init --dataset` unchanged; the launcher
+skips the Terminal-Bench asset check and the pinned-subset materializer. Leave
+it unset to keep the prepared subset behavior. To initialize a workspace
+directly, pass the printed path to `evolve init --dataset`.
 
 ## Storage and cache overrides
 

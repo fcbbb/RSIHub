@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import uuid
 from pathlib import Path
@@ -53,6 +54,9 @@ def _verify(root: Path, expected: dict[str, str], *, allow_extra: bool = False) 
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Digests cover file modes, so create the materialized tree independently
+    # of the caller's umask (commonly 0002 on shared Linux hosts).
+    os.umask(0o022)
     parser = argparse.ArgumentParser()
     parser.add_argument("source", type=Path, help="exported terminal-bench@2.0 task directory")
     parser.add_argument("destination", type=Path, help="pinned subset directory")
@@ -67,7 +71,11 @@ def main(argv: list[str] | None = None) -> int:
     expected = _expected_tasks(manifest)
     source_mismatch = _verify(source, expected, allow_extra=True)
     if source_mismatch:
-        raise SystemExit("source does not match the pinned subset: " + source_mismatch)
+        raise SystemExit(
+            "source does not match the pinned subset: "
+            + source_mismatch
+            + " (file modes are part of the digest; re-export with umask 022)"
+        )
 
     if destination.exists():
         destination_mismatch = _verify(destination, expected)

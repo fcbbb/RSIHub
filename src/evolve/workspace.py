@@ -47,6 +47,15 @@ _SEED_IGNORE_PATTERNS = (
     ".ruff_cache",
     "node_modules",
 )
+# Builtin candidate seeds shipped under ``seeds/``; the ``builtin-`` prefix
+# maps to the directory name. ``dsh`` is the legacy host-SDK target used by
+# hyperagents_dsh; ``dsh-harbor`` is the ahe_dsh InstalledAgent variant.
+_BUILTIN_SEEDS = (
+    "builtin-codex",
+    "builtin-dsh",
+    "builtin-dsh-harbor",
+    "builtin-local-smoke",
+)
 _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _GIT_COMMIT = re.compile(r"[0-9a-fA-F]{40}")
 _GENERATED_EVALUATOR_PATHS = frozenset(
@@ -439,7 +448,7 @@ def _validate_target_config(target: dict[str, Any]) -> None:
     if not isinstance(generate_lock, bool):
         raise ValueError("target.generate_lock must be a boolean")
 
-    if seed in ("builtin-codex", "builtin-dsh", "builtin-local-smoke") or _looks_like_git_url(seed):
+    if seed in _BUILTIN_SEEDS or _looks_like_git_url(seed):
         return
     if revision is not None:
         raise ValueError("target.revision requires a git URL seed")
@@ -486,7 +495,7 @@ def _write_target(workspace: Path, target_config: dict[str, Any]) -> None:
     revision_value = target_config.get("revision")
     revision = cast(str | None, revision_value)
     generate_lock = target_config.get("generate_lock", False)
-    if seed_text in ("builtin-codex", "builtin-dsh", "builtin-local-smoke"):
+    if seed_text in _BUILTIN_SEEDS:
         _copy_resource_tree(seed_root() / seed_text.removeprefix("builtin-"), workspace / "target")
         (workspace / "target" / "UPSTREAM.json").write_text(
             json.dumps({"kind": "builtin", "seed": seed_text}, sort_keys=True) + "\n"

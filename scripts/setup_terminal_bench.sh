@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Task content digests include file modes; a permissive caller umask would make
+# every exported task mismatch the pinned manifest.
+umask 022
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 RECIPE=${1:-}
@@ -23,7 +26,7 @@ cleanup() {
 trap cleanup EXIT
 
 case "$RECIPE" in
-  aevolve|ahe|hyperagents|ahe_codex|gepa|hill_climb|hill_climb_codex|hyperagents_codex|hyperagents_dsh|hyperagents_tbench_full|hyperagents_codex_tbench_full) ;;
+  aevolve|ahe|hyperagents|ahe_codex|gepa|hill_climb|hill_climb_codex|hyperagents_codex|hyperagents_dsh|ahe_dsh|hyperagents_tbench_full|hyperagents_codex_tbench_full) ;;
   *)
     [[ -f "$RECIPE" || -f "$RECIPE/evolve.yaml" ]] || {
       echo "unsupported recipe; supported recipes are Terminal-Bench profiles or a recipe YAML path" >&2; exit 2;
@@ -58,6 +61,10 @@ case "$RUNTIME_KIND" in
   miniswe)
     IMAGE_CONTEXT=$ROOT/containers/mutate
     BUILD_ARGS=(--build-arg "MINISWE_VERSION=$IMAGE_VERSION")
+    ;;
+  dsh)
+    IMAGE_CONTEXT=$ROOT/containers/mutate-dsh
+    BUILD_ARGS=(--build-arg "DSH_VERSION=$IMAGE_VERSION")
     ;;
   local)
     # Dataset-only recipes (hyperagents_dsh): mutate is runner: local on the host.
@@ -94,6 +101,9 @@ else
   if [[ $RUNTIME_KIND == codex ]]; then
     PROBE+='command -v node >/dev/null; codex --version'
     EXPECTED="codex-cli $IMAGE_VERSION"
+  elif [[ $RUNTIME_KIND == dsh ]]; then
+    PROBE+='command -v node >/dev/null; dsh --version'
+    EXPECTED=$IMAGE_VERSION
   else
     PROBE+="command -v uv >/dev/null; /root/.local/share/uv/tools/mini-swe-agent/bin/python -c 'import importlib.metadata; print(importlib.metadata.version(\"mini-swe-agent\"))'"
     EXPECTED=$IMAGE_VERSION

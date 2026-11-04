@@ -1,0 +1,48 @@
+# Candidate composition (gen-0 seed) — this file plus this directory IS the
+# mutable surface: the model-visible layer of the dsh agent.
+#
+# Package names here MUST ship in the evaluation runtime's sdk-minimal profile
+# (or be relative ./plugins/*.mjs paths). Do NOT reference removed demo spine
+# packages that pre-date sdk-minimal.
+#
+# At rollout time DshAgent materializes this file as a --patch (not
+# cordis-plugin-include) and rewrites ./plugins/* to absolute paths inside the
+# task container. @deepseek-ai/* resolves from the dsh installation staged at
+# /opt/evolve-dsh. The frozen Harbor seams (local bash in the task container,
+# pinned model, session home) live in
+# runners/compositions/rollout.base.cordis.yml.
+
+# Persona — patches the sdk-minimal system-prompt row.
+- id: system-prompt
+  name: '@deepseek-ai/dsh-system-prompt'
+  config:
+    includeHarnessIdentity: false
+    includeRuntimeContext: false
+    personaPrefix: |-
+      You are an expert software engineer completing tasks in a Linux environment.
+      Work step by step: inspect the environment first, form a plan, then execute.
+      Verify your results before declaring completion; prefer running the task's own
+      checks when they exist. Be persistent: if an approach fails, diagnose why and
+      try another.
+
+# Model-visible bash tool. backendType: shell consumes sdk-minimal's local
+# terminal-bash, which executes inside the task container itself (the runtime
+# is installed there, like Harbor's Codex/MiniSWE InstalledAgents). Keep
+# backendType: shell — changing it breaks tool wiring.
+- id: persistent-bash
+  name: '@deepseek-ai/dsh-tool-bash-persistent'
+  config:
+    backendType: shell
+    timeoutMs: 300000
+    description: |-
+      Run commands in a persistent bash shell inside the task environment.
+      * State (cwd, variables, functions) persists across calls.
+      * To inspect a line range of a file, use e.g. 'sed -n 10,25p /path/to/file'.
+      * Avoid commands that produce a very large amount of output.
+      * Run long lived commands in the background, e.g. 'sleep 10 &'.
+
+# Evolved-plugin mount area: each plugins/*.mjs needs a line here to take effect.
+# Relative paths are rewritten to absolute paths by the rollout driver.
+- insert:
+    - id: plugin-seed-probe
+      name: './plugins/seed-probe.mjs'

@@ -1,0 +1,31 @@
+# Frozen candidate runtime overlay — applied as a `--patch` on top of
+# profile sdk-minimal. Candidates cannot edit this file.
+#
+# The dsh runtime runs INSIDE the Harbor task container (like the installed
+# Codex/MiniSWE agents), so sdk-minimal's own local `terminal-bash` plus
+# `persistent-bash` rows are the tool execution path. There is deliberately no
+# docker-exec shell bridge here: `bash` runs in the container that the model
+# is already isolated in.
+#
+# The session working directory comes from the SDK `initialize` request
+# (built from the container's WorkingDir by DshAgent); the model and provider
+# are chosen there too, so this patch only pins runtime defaults
+# that must not drift with an evolved candidate profile:
+#   - sandbox stays danger-full-access: the task container IS the sandbox
+#   - the DeepSeek adapter reads credentials from the injected env
+#
+# Runtime variables (injected by the in-container driver):
+#   DSH_MODEL / DSH_CONTEXT_WINDOW / DEEPSEEK_API_KEY / DEEPSEEK_BASE_URL
+
+- id: sandbox-policy
+  config:
+    mode: danger-full-access
+    workspaceRoot: !!js process.cwd()
+
+- id: llm-deepseek
+  config:
+    apiKeyEnv: DEEPSEEK_API_KEY
+    streamIdleTimeoutMs: 600000
+    models:
+      - id: !!js process.env.DSH_MODEL ?? 'deepseek-v4-flash'
+        contextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW ?? 1000000)

@@ -94,6 +94,41 @@ workspace configuration, task partitions, model selection, credentials,
 endpoints, or resource limits.
 """
 
+DSH_AHE_PROMPT = """# Agentic Harness Engineering
+
+Improve the DeepSeek Harness (dsh) candidate under `target/`; do not solve a
+benchmark task directly. Optimize pass@1. Treat debugger reports as evidence,
+not proof. Make changes only within the declared mutable surface.
+
+For this generation:
+1. Read the debugger overview and relevant task details first.
+2. Read change_evaluation.json and the previous change context.
+3. Decide KEEP, REVISE, or ROLLBACK + PIVOT before editing.
+4. Cite specific debugger tasks and distinguish evidence from causal inference.
+5. Choose the candidate harness component matching the root cause.
+6. If the same failure survived repeated changes at one component, pivot levels.
+7. Make one coherent target/** change and run proportionate checks.
+8. Write one official-style change manifest to the required control file.
+
+`target/profile.cordis.yml` is a patch over the fixed `sdk-minimal` dsh bundle.
+The evolvable surface is the candidate profile, `target/plugins/`,
+`target/skills/`, `target/PLAYBOOK.md`, and `target/EVOLUTION_LOG.md`. Never
+edit `target/agent.py`, `target/dsh_trajectory.py`, or `target/runners/**`:
+those are frozen Harbor/rollout seams. Keep the profile valid YAML and keep
+plugin imports resolvable. The sdk-minimal runtime is fixed: reference only
+packages it already installs and never add npm dependencies or import removed
+demo-spine packages. If you edit runtime instructions or plugin output, include
+only guidance usable by the benchmark-solving agent; do not copy this evolution
+workflow, evidence paths, KEEP/REVISE/ROLLBACK decisions, or manifest
+requirements into target files, and do not refer to debuggers or other
+evolution-only context there.
+
+Current debugger reports evaluate the selected parent. The new edit will be
+evaluated by the next loop. Do not edit the evaluator, mechanism, archive,
+workspace configuration, task partitions, model selection, credentials,
+endpoints, or resource limits.
+"""
+
 MANIFEST_TEMPLATE = {
     "iteration": 1,
     "changes": [
@@ -229,7 +264,22 @@ def build_prompt(checkout: Path, observation: str, ctx: OperatorContext) -> str:
         prior_change = (
             f"Inspect the selected parent manifest and patch. Selected parent mutate artifacts: `{parent_mutate}`"
         )
-    target_prompt = CODEX_AHE_PROMPT if (checkout / "target" / "codex.toml").is_file() else AHE_PROMPT
+    if (checkout / "target" / "codex.toml").is_file():
+        target_prompt = CODEX_AHE_PROMPT
+    elif (checkout / "target" / "profile.cordis.yml").is_file():
+        target_prompt = DSH_AHE_PROMPT
+    else:
+        target_prompt = AHE_PROMPT
+    writes_manifest = (
+        "After checks, before finishing the turn, "
+        if target_prompt is DSH_AHE_PROMPT
+        else "After checks and before the submission action, "
+    )
+    submit_clause = (
+        "Finish the turn normally; the harness snapshots `target/`."
+        if target_prompt is DSH_AHE_PROMPT
+        else "Then submit normally."
+    )
     return (
         f"{target_prompt.rstrip()}\n\n"
         "# Evidence reading order\n\n"
@@ -246,9 +296,9 @@ def build_prompt(checkout: Path, observation: str, ctx: OperatorContext) -> str:
         f"Raw trace evidence: {current_run / 'analyze' / 'evidence'}\n\n"
         f"{render_artifact_guidance(ctx, experiment)}\n\n"
         f"{workspace_contract(checkout, ctx.config, action_paths=['target'])}\n\n"
-        "# Required Final Output\n\nEdit the candidate directly. After checks and before the submission action, "
-        f"write the following JSON object to `{MANIFEST_FILE}`. Write JSON only; this control file is removed "
-        "before the candidate patch is created. Then submit normally.\n\n"
+        "# Required Final Output\n\nEdit the candidate directly. "
+        f"{writes_manifest}write the following JSON object to `{MANIFEST_FILE}`. Write JSON only; this control file "
+        f"is removed before the candidate patch is created. {submit_clause}\n\n"
         f"```json\n{json.dumps(template, indent=2)}\n```\n"
     )
 

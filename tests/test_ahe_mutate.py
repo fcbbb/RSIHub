@@ -192,6 +192,24 @@ def test_ahe_prompt_describes_codex_plugin_target_when_present(tmp_path: Path) -
     assert "delimited official-style" not in prompt
 
 
+def test_ahe_prompt_describes_dsh_candidate_when_profile_present(tmp_path: Path) -> None:
+    module = _module()
+    checkout, _run_dir, ctx = _case(tmp_path)
+    (checkout / "target" / "profile.cordis.yml").write_text("[]\n")
+    prompt = module.build_prompt(checkout, "fallback", ctx)
+    normalized = " ".join(prompt.split())
+
+    assert "DeepSeek Harness (dsh) candidate" in prompt
+    assert "sdk-minimal" in normalized
+    assert "target/profile.cordis.yml" in prompt
+    assert "`target/plugins/`" in prompt
+    assert "Never edit `target/agent.py`" in normalized
+    assert "Finish the turn normally" in prompt
+    assert "Then submit normally" not in prompt
+    assert "Improve the MiniSWE harness" not in prompt
+    assert "Improve the Codex harness" not in prompt
+
+
 def test_ahe_prompt_does_not_require_readable_evidence_bodies(tmp_path: Path) -> None:
     module = _module()
     checkout, _run_dir, ctx = _case(tmp_path)

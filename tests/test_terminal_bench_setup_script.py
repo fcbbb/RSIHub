@@ -40,12 +40,21 @@ if name == "docker":
         raise SystemExit(0)
     if args[:1] == ["build"]:
         image = args[args.index("-t") + 1]
-        images[image] = next(a.split("=", 1)[1] for a in args if a.startswith(("CODEX_VERSION=", "MINISWE_VERSION=")))
+        images[image] = next(
+            a.split("=", 1)[1]
+            for a in args
+            if a.startswith(("CODEX_VERSION=", "MINISWE_VERSION=", "DSH_VERSION="))
+        )
         state.write_text(json.dumps(images))
         raise SystemExit(0)
     if args[:1] == ["run"]:
         version = next(iter(images.values()))
-        print(version if "mini-swe-agent" in args[-1] else "codex-cli " + version)
+        if "mini-swe-agent" in args[-1]:
+            print(version)
+        elif "dsh --version" in args[-1]:
+            print(version)
+        else:
+            print("codex-cli " + version)
         raise SystemExit(0)
     raise SystemExit(2)
 
@@ -81,7 +90,10 @@ def _environment(tmp_path: Path, **values: str) -> tuple[dict[str, str], Path]:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     tool = fake_bin / "tool"
-    tool.write_text(FAKE_TOOL)
+    # The fake `uv run` re-executes scripts with `sys.executable`, so the shim
+    # must use the interpreter running the tests rather than whatever
+    # `python3` the caller's PATH happens to resolve to.
+    tool.write_text(FAKE_TOOL.replace("#!/usr/bin/env python3", f"#!{sys.executable}", 1))
     tool.chmod(0o755)
     for name in ("docker", "git", "uv"):
         (fake_bin / name).symlink_to(tool)
@@ -214,6 +226,19 @@ def test_setup_prepares_dataset_only_for_hyperagents_dsh(tmp_path: Path) -> None
     assert not any(call[:2] == ["docker", "run"] for call in calls)
     assert "local mutate" in result.stdout or "Dataset ready" in result.stdout
     assert "./scripts/run_recipe_demo.sh hyperagents_dsh" in result.stdout
+
+
+def test_setup_builds_dsh_image_for_ahe_dsh(tmp_path: Path) -> None:
+    result, calls = _run(tmp_path, "ahe_dsh")
+
+    assert result.returncode == 0, result.stderr
+    build = next(call for call in calls if call[:2] == ["docker", "build"])
+    assert "DSH_VERSION=0.2.1-rc.5" in build
+    assert build[build.index("-t") + 1] == "evolve-mutate-dsh:20261104-dsh021rc5"
+    assert str(ROOT / "containers" / "mutate-dsh") in build[-1]
+    probe = next(call for call in calls if call[:2] == ["docker", "run"])
+    assert "dsh --version" in probe[-1]
+    assert "./scripts/run_recipe_demo.sh ahe_dsh" in result.stdout
 
 
 def test_setup_builds_codex_image_for_gepa(tmp_path: Path) -> None:

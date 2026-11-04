@@ -113,6 +113,7 @@ decision (and usually a demolition pass) instead of silent sprawl.
 | `integrations/harbor/codex_candidate.py` | 75 | Codex adapter for OpenAI-compatible Responses endpoints |
 | `integrations/harbor/miniswe_candidate.py` | 550 | exact-candidate MiniSWE Harbor evaluator agent |
 | `integrations/harbor/miniswe_task_file.py` | 130 | large-task MiniSWE mutate-runner transport |
+| `integrations/harbor/dsh_container.py` | 240 | dsh headless mutate/analyst agents running inside the mutation image |
 | `mutate_budget.py` | 150 | shared Harbor mutation retry and timeout budget calculations |
 | `viewer/__init__.py` | 30 | read-only experiment viewer package facade |
 | `viewer/catalog.py` | 125 | validated multi-workspace catalog metadata and path resolution |
@@ -137,7 +138,7 @@ each workspace, immutable there because it sits outside the mutable surface
 | `frozen/interfaces.py` | 375 | operator ABCs, registry, result schemas, and strict operator payload validation |
 | `frozen/sdk.py` | 350 | Python operator entrypoint and file-contract IO; no library algorithm policy |
 
-Total `src/evolve/` budget: **27290 lines**. The budget admits the read-only experiment viewer,
+Total `src/evolve/` budget: **27530 lines**. The budget admits the read-only experiment viewer,
 the explicit content-backed
 evaluation-contract boundaries, the opt-in in-place Harbor runtime, and the redacted trace-analysis
 boundary between rollout and feedback assembly; if the mechanism wants to

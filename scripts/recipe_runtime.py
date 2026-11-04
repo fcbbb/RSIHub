@@ -34,17 +34,24 @@ def resolve(recipe: str) -> tuple[str, str, str]:
         kind, version = "codex", config.get("agent_kwargs", {}).get("version", pins["CODEX_MUTATE_VERSION"])
     elif agent == "evolve.integrations.harbor.miniswe_task_file:InstalledMiniSweAgent":
         kind, version = "miniswe", pins["MINISWE_VERSION"]
+    elif agent == "evolve.integrations.harbor.dsh_container:DshContainerAgent":
+        kind = "dsh"
+        role = (config.get("agent_kwargs") or {}).get("role", "mutate")
+        if role != "mutate":
+            raise ValueError("setup builds the dsh mutate image; the mutate agent_kwargs.role must be 'mutate'")
+        version = (config.get("agent_kwargs") or {}).get("version", pins["DSH_MUTATE_VERSION"])
     else:
         raise ValueError(
-            "setup supports Codex and installed MiniSWE mutation images, "
+            "setup supports Codex, installed MiniSWE, and dsh headless mutation images, "
             "or local mutate (runner: local without agent/image) for dataset-only prep"
         )
     image = config.get("image")
-    if not isinstance(version, str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version):
+    exact_version = r"[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?"
+    if not isinstance(version, str) or not re.fullmatch(exact_version, version):
         raise ValueError("operators.mutate.config.agent_kwargs.version must be an exact version string")
     if not isinstance(image, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/:-]*", image):
         raise ValueError("operators.mutate.config.image must be a buildable image tag")
-    for role in ("CODEX_MUTATE", "CODEX_RESEARCH", "MINISWE"):
+    for role in ("CODEX_MUTATE", "CODEX_RESEARCH", "MINISWE", "DSH_MUTATE"):
         if image == pins[role + "_IMAGE"] and version != pins[role + "_VERSION"]:
             raise ValueError("version differs from the reserved image tag; choose a distinct config.image tag")
     return kind, version, image

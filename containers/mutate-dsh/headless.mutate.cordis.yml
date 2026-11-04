@@ -1,0 +1,73 @@
+# AHE mutate overlay for `dsh --profile headless` (dsh 0.2.1-rc.5).
+#
+# The candidate is evaluated through the sdk-minimal runtime in
+# full-chain/rollout.  This overlay only changes the *meta* session that edits
+# the candidate: persona, model, and approval.  It intentionally does not
+# touch sandbox-policy or insert terminal/persistent-bash rows; headless ships
+# writable tool-fs and tool-bash over dsh-base.
+#
+# Environment injected by DshContainerAgent:
+#   DSH_MODEL / DSH_CONTEXT_WINDOW / DEEPSEEK_API_KEY / DEEPSEEK_BASE_URL
+#   DSH_PERMISSION_MODE=workspace-write
+
+- id: system-prompt
+  config:
+    personaPrefix: |-
+      You are a harness engineer evolving a DeepSeek Harness (dsh) candidate.
+      Your working directory is the candidate workspace. The candidate profile is
+      `target/profile.cordis.yml`; it is a patch over the sdk-minimal bundle.
+      `target/plugins/` holds candidate plugin source files and `target/skills/`
+      holds candidate skill packages.
+
+      Improve pass@1 by editing only the declared mutable surface:
+      `target/profile.cordis.yml`, `target/plugins/**`, `target/skills/**`,
+      `target/PLAYBOOK.md`, and `target/EVOLUTION_LOG.md`. Never edit
+      `target/agent.py`, `target/dsh_trajectory.py`, or `target/runners/**`.
+
+      Read the debugger evidence first, choose one coherent change tied to a
+      concrete failure, and keep the profile valid YAML. The sdk-minimal runtime
+      is fixed: only reference packages already installed in it, and never add
+      npm dependencies or import removed demo-spine packages. Do not copy this
+      evolution workflow, evidence paths, or change-manifest requirements into
+      runtime prompts. Before finishing the turn, write the required AHE change
+      manifest; the harness snapshots `target/` when the turn ends.
+
+- id: agent-default-model
+  config:
+    provider: deepseek-official
+    model: !!js process.env.DSH_MODEL ?? 'deepseek-v4-flash'
+
+- id: llm-deepseek
+  config:
+    apiKeyEnv: DEEPSEEK_API_KEY
+    streamIdleTimeoutMs: 600000
+    models:
+      - id: !!js process.env.DSH_MODEL ?? 'deepseek-v4-flash'
+        contextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW ?? 1000000)
+
+# Headless has no interactive approver; a one-shot meta session must never wait.
+# `never` rejects approval requests instead of hanging, so only workspace
+# sandbox actions (which need no approval) are used.
+- id: approval
+  config:
+    policy: never
+
+# Presets bundle a sandbox mode with an approval policy. Patching approval to
+# `never` no longer matches the built-in `workspace-write` preset (approval
+# `ask`), so declare the matching preset explicitly; otherwise service
+# construction fails with "composed sandbox and approval defaults match no
+# preset".
+- id: permission
+  config:
+    defaultPreset: evolve-workspace-write
+    presets:
+      evolve-workspace-write:
+        sandbox: workspace-write
+        approval: never
+        name: evolve-workspace-write
+        description: Write inside the workspace without approval prompts; escalation is rejected.
+
+# Session titles are unnecessary for one-shot runs and would spend an extra
+# model call on every invocation.
+- id: session-title-llm
+  disabled: true

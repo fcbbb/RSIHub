@@ -9,6 +9,7 @@ SUPPORTED_RECIPES = {
     "aevolve",
     "ahe",
     "ahe_codex",
+    "ahe_dsh",
     "gepa",
     "gepa_local",
     "hill_climb",
@@ -26,6 +27,7 @@ TERMINAL_BENCH_DATASET = "terminal-bench-2-30-v1"
 CODEX_IMAGE = "evolve-mutate-codex:20260818-codex0146"
 CODEX_FULL_IMAGE = "evolve-mutate-codex:20260904-codex0149"
 MINISWE_IMAGE = "evolve-mutate-app:20260724-tools-mswe245"
+DSH_IMAGE = "evolve-mutate-dsh:20261104-dsh021rc5"
 
 
 def _config(name: str) -> str:
@@ -53,6 +55,8 @@ def test_main_recipes_share_terminal_bench_and_explicit_mutate_images() -> None:
         expected_image = MINISWE_IMAGE if name in {"hyperagents_tbench_full"} else CODEX_IMAGE
         if name == "hyperagents_codex_tbench_full":
             expected_image = CODEX_FULL_IMAGE
+        if name == "ahe_dsh":
+            expected_image = DSH_IMAGE
         assert mutate["image"] == expected_image
 
 
@@ -107,6 +111,15 @@ def test_supported_recipes_use_harbor_and_method_mutate() -> None:
             "rollout": "parent_evaluation",
             "analyze": "ahe",
             "mutate": "ahe",
+            "gate": "ahe_artifact_valid",
+            "record": "jsonl",
+        },
+        "ahe_dsh": {
+            "select": "ahe_latest",
+            "rollout": "parent_evaluation",
+            "analyze": "ahe",
+            "mutate": "ahe",
+            "validate": "node_check",
             "gate": "ahe_artifact_valid",
             "record": "jsonl",
         },
@@ -222,6 +235,15 @@ def test_supported_recipes_use_harbor_and_method_mutate() -> None:
                 if name == "hyperagents_tbench_full"
                 else "codex"
             )
+        elif name == "ahe_dsh":
+            assert config["target"]["seed"] == "builtin-dsh-harbor"
+            assert mutate["runner"] == "harbor"
+            assert mutate["agent"] == "evolve.integrations.harbor.dsh_container:DshContainerAgent"
+            assert mutate["agent_kwargs"]["role"] == "mutate"
+            debugger = resolved.operators["analyze"].config["debugger"]
+            assert debugger["agent"] == "evolve.integrations.harbor.dsh_container:DshContainerAgent"
+            assert debugger["agent_kwargs"]["role"] == "analyst"
+            assert debugger["image"] == DSH_IMAGE
         elif name == "hyperagents_dsh":
             assert config["target"]["seed"] == "builtin-dsh"
             assert mutate["runner"] == "local"
@@ -232,14 +254,25 @@ def test_supported_recipes_use_harbor_and_method_mutate() -> None:
 
 
 def test_codex_mutates_use_the_preinstalled_codex_image() -> None:
-    for name in MAIN_RECIPES - {"hyperagents_tbench_full"} - LOCAL_MUTATE_RECIPES:
+    for name in MAIN_RECIPES - {"hyperagents_tbench_full", "ahe_dsh"} - LOCAL_MUTATE_RECIPES:
         expected = CODEX_FULL_IMAGE if name == "hyperagents_codex_tbench_full" else CODEX_IMAGE
         assert _operator_config(name, "mutate")["image"] == expected
+
+
+def test_dsh_mutate_uses_the_headless_mutation_image() -> None:
+    mutate = _operator_config("ahe_dsh", "mutate")
+    assert mutate["image"] == DSH_IMAGE
+    assert mutate["runner"] == "harbor"
+    assert mutate["agent"] == "evolve.integrations.harbor.dsh_container:DshContainerAgent"
+    debugger = _operator_config("ahe_dsh", "analyze")["debugger"]
+    assert debugger["image"] == DSH_IMAGE
+    assert debugger["agent_kwargs"]["role"] == "analyst"
 
 
 def test_terminal_bench_method_recipes_use_full_curated_dataset() -> None:
     expected_datasets = {
         "ahe": TERMINAL_BENCH_DATASET,
+        "ahe_dsh": TERMINAL_BENCH_DATASET,
         "hyperagents": TERMINAL_BENCH_DATASET,
         "hyperagents_codex": TERMINAL_BENCH_DATASET,
         "hyperagents_dsh": TERMINAL_BENCH_DATASET,
@@ -459,7 +492,9 @@ def test_hyperagents_recipe_configures_reasoning_without_cost_caps() -> None:
 
 
 def test_benchmark_mutators_use_codex_xhigh() -> None:
-    for name in MAIN_RECIPES - {"hyperagents_tbench_full", "hyperagents_codex_tbench_full"} - LOCAL_MUTATE_RECIPES:
+    for name in (
+        MAIN_RECIPES - {"hyperagents_tbench_full", "hyperagents_codex_tbench_full", "ahe_dsh"} - LOCAL_MUTATE_RECIPES
+    ):
         mutate = _operator_config(name, "mutate")
         assert mutate["agent"] == "codex"
         assert mutate["model"] == "gpt-5.4"

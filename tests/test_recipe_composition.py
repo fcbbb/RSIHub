@@ -189,6 +189,49 @@ def test_hyperagents_dsh_recipe_initializes_builtin_seed_and_local_mutate(tmp_pa
     assert (workspace / "evaluator" / "cleanup_harbor.py").is_file()
 
 
+def test_ahe_dsh_recipe_uses_headless_container_agents(tmp_path: Path) -> None:
+    workspace = tmp_path / "ahe_dsh"
+    init_workspace(
+        InitOptions(
+            workspace=workspace,
+            recipe="ahe_dsh",
+            dataset=str(_local_dataset(tmp_path / "tasks")),
+        )
+    )
+
+    rendered = load_config(workspace / "evolve.yaml")
+    assert rendered["target"] == {"seed": "builtin-dsh-harbor"}
+    assert rendered["evaluator"]["agent"] == "target.agent:DshAgent"
+    mutate = rendered["operators"]["mutate"]["config"]
+    assert mutate["runner"] == "harbor"
+    assert mutate["agent"] == "evolve.integrations.harbor.dsh_container:DshContainerAgent"
+    assert mutate["agent_kwargs"]["role"] == "mutate"
+    debugger = rendered["operators"]["analyze"]["config"]["debugger"]
+    assert debugger["agent_kwargs"]["role"] == "analyst"
+    assert debugger["image"] == "evolve-mutate-dsh:20261104-dsh021rc5"
+    assert rendered["operators"]["validate"]["operator"] == "node_check"
+    for relative in (
+        "agent.py",
+        "dsh_trajectory.py",
+        "profile.cordis.yml",
+        "runners/compositions/rollout.base.cordis.yml",
+    ):
+        assert (workspace / "target" / relative).is_file()
+    # The harbor seed carries no host-side mutator; mutate runs in the image.
+    for relative in (
+        "runners/mutate_local.py",
+        "runners/mutate_driver.py",
+        "runners/runtime_mode.py",
+        "runners/compositions/mutate.cordis.yml",
+    ):
+        assert not (workspace / "target" / relative).exists()
+    components = json.loads((workspace / ".evolve-components.json").read_text())
+    assert components["recipe"] == "ahe_dsh"
+    assert components["target_seed"] == "builtin-dsh-harbor"
+    assert components["evaluator_engine"] == "harbor"
+    assert components["integrations"] == ["evolve.integrations.harbor.dsh_container"]
+
+
 def test_recipe_path_rejects_recipe_local_operators_before_workspace_writes(tmp_path: Path) -> None:
     recipe = tmp_path / "custom-path-recipe"
     shutil.copytree(Path(recipe_root()) / "hill_climb", recipe)

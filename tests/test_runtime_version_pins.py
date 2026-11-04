@@ -58,3 +58,5 @@ def test_shipped_mutation_image_tags_match_their_role():
                 assert recipe["evaluator"]["agent_kwargs"]["version"] == PINS[role + "_VERSION"]
         if image.startswith("evolve-mutate-app:"):
             assert image == PINS["MINISWE_IMAGE"]
+        if image.startswith("evolve-mutate-dsh:"):
+            assert image == PINS["DSH_MUTATE_IMAGE"]

@@ -55,7 +55,7 @@ recipe YAML
   -> generation-zero Git snapshot
 ```
 
-The framework ships `aevolve`, `ahe`, `ahe_codex`, `gepa`, `gepa_local`,
+The framework ships `aevolve`, `ahe`, `ahe_codex`, `ahe_dsh`, `gepa`, `gepa_local`,
 `hill_climb`, `hill_climb_codex`, `hyperagents`, `hyperagents_codex`,
 `hyperagents_dsh`, and the full-benchmark profiles `hyperagents_tbench_full`
 and `hyperagents_codex_tbench_full`.

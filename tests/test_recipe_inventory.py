@@ -7,6 +7,7 @@ SUPPORTED = {
     "aevolve",
     "ahe",
     "ahe_codex",
+    "ahe_dsh",
     "gepa",
     "gepa_local",
     "hill_climb",

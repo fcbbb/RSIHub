@@ -280,11 +280,7 @@ def _reviewbench_overall(reward: object) -> dict[str, int] | None:
     counts: dict[str, int] = {}
     for field in _REVIEWBENCH_COUNT_FIELDS:
         value = reward.get(f"overall.{field}")
-        if (
-            type(value) not in (int, float)
-            or not 0 <= value <= 2**53 - 1
-            or value != int(value)
-        ):
+        if type(value) not in (int, float) or not 0 <= value <= 2**53 - 1 or value != int(value):
             return None
         counts[field] = int(value)
     if (
@@ -444,9 +440,7 @@ def _merge_resumed_trials(trials: list[dict[str, Any]]) -> list[dict[str, Any]]:
         grouped.setdefault(str(trial["task_name"]), []).append(trial)
     merged: list[dict[str, Any]] = []
     for entries in grouped.values():
-        final = sorted(
-            (entry for entry in entries if entry["status"] in FINAL_TRIAL_STATUSES), key=_merged_trial_order
-        )
+        final = sorted((entry for entry in entries if entry["status"] in FINAL_TRIAL_STATUSES), key=_merged_trial_order)
         pending = sorted(
             (entry for entry in entries if entry["status"] not in FINAL_TRIAL_STATUSES), key=_merged_trial_order
         )

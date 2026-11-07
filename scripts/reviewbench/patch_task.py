@@ -111,23 +111,18 @@ def verify_task_toml(task: Path) -> None:
     agent = payload.get("agent") or {}
     if agent.get("allowed_hosts"):
         raise SystemExit(
-            f"{task / 'task.toml'}: [agent].allowed_hosts must be empty; "
-            "the model host is injected at run time"
+            f"{task / 'task.toml'}: [agent].allowed_hosts must be empty; the model host is injected at run time"
         )
     if agent.get("network_mode") != "allowlist":
         raise SystemExit(f"{task / 'task.toml'}: [agent].network_mode must stay 'allowlist'")
     verifier = payload.get("verifier") or {}
     if verifier.get("network_mode") == "allowlist" and not verifier.get("allowed_hosts"):
-        raise SystemExit(
-            f"{task / 'task.toml'}: [verifier].allowed_hosts lost the judge host"
-        )
+        raise SystemExit(f"{task / 'task.toml'}: [verifier].allowed_hosts lost the judge host")
 
 
 def main() -> None:
     if len(sys.argv) != 5:
-        raise SystemExit(
-            "usage: patch_task.py TASK_DIR PROVIDER MODEL BASE_URL"
-        )
+        raise SystemExit("usage: patch_task.py TASK_DIR PROVIDER MODEL BASE_URL")
     task = Path(sys.argv[1])
     provider, model, base_url = sys.argv[2:5]
     if not (task / "task.toml").is_file():

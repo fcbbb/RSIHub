@@ -369,11 +369,11 @@ def _attempt_jobs_roots(attempt_path: Path) -> list[Path]:
     default = attempt_path / "jobs"
     if default.is_dir():
         roots.append(default)
-    resumed = [
-        path
-        for path in attempt_path.iterdir()
-        if path.is_dir() and re.fullmatch(r"jobs-resume-\d+", path.name)
-    ] if attempt_path.is_dir() else []
+    resumed = (
+        [path for path in attempt_path.iterdir() if path.is_dir() and re.fullmatch(r"jobs-resume-\d+", path.name)]
+        if attempt_path.is_dir()
+        else []
+    )
     roots.extend(sorted(resumed, key=lambda path: int(path.name.rsplit("-", 1)[1])))
     return roots
 

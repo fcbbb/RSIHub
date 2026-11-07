@@ -132,12 +132,15 @@ def _write_attempt(
 ) -> Path:
     from evolve.runtime import attempt_parent
 
-    attempt = attempt_parent(
-        workspace,
-        purpose=plan.purpose,
-        generation=plan.generation,
-        candidate_commit=plan.candidate_commit,
-    ) / f"attempt-{number}"
+    attempt = (
+        attempt_parent(
+            workspace,
+            purpose=plan.purpose,
+            generation=plan.generation,
+            candidate_commit=plan.candidate_commit,
+        )
+        / f"attempt-{number}"
+    )
     attempt.mkdir(parents=True)
     (prior or plan).write(attempt / "run-plan.json")
     if status is not None:
@@ -165,7 +168,9 @@ def test_resume_reuses_only_incomplete_matching_attempts(tmp_path: Path) -> None
         plan,
         number=2,
         status="complete",
-        results=(("task-a", {"task_name": "task-a", "trial_name": "a", "verifier_result": {"rewards": {"reward": 1}}}),),
+        results=(
+            ("task-a", {"task_name": "task-a", "trial_name": "a", "verifier_result": {"rewards": {"reward": 1}}}),
+        ),
     )
     _write_attempt(
         tmp_path,

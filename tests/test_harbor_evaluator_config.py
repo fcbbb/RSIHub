@@ -220,9 +220,7 @@ def test_init_accepts_reviewbench_reward_schema(tmp_path: Path) -> None:
         (lambda config: config["evaluator"].update(partial_floor=0.9), "requires evaluator.partial_floor: 1.0"),
     ],
 )
-def test_init_rejects_invalid_reviewbench_reward_schema(
-    tmp_path: Path, mutate, message: str
-) -> None:
+def test_init_rejects_invalid_reviewbench_reward_schema(tmp_path: Path, mutate, message: str) -> None:
     config = _reviewbench_config()
     mutate(config)
 

@@ -1203,7 +1203,7 @@ def test_engine_forwards_agent_allowed_hosts(tmp_path: Path) -> None:
     _write_fake_uv(fake_bin)
     _write_executable(
         fake_bin / "python3",
-        "#!/bin/sh\nexec \"$EVOLVE_FRAMEWORK_PYTHON\" \"$@\"\n",
+        '#!/bin/sh\nexec "$EVOLVE_FRAMEWORK_PYTHON" "$@"\n',
     )
     _write_executable(
         fake_bin / "harbor",
@@ -1240,9 +1240,10 @@ def test_engine_forwards_agent_allowed_hosts(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     arguments = (run_dir / "harbor-args").read_text().splitlines()
-    assert [
-        arguments[index + 1] for index, value in enumerate(arguments) if value == "--allow-agent-host"
-    ] == ["model.example.com", "inference.example.org"]
+    assert [arguments[index + 1] for index, value in enumerate(arguments) if value == "--allow-agent-host"] == [
+        "model.example.com",
+        "inference.example.org",
+    ]
 
 
 def test_score_parser_merges_resumed_job_roots(tmp_path: Path) -> None:
@@ -1258,7 +1259,9 @@ def test_score_parser_merges_resumed_job_roots(tmp_path: Path) -> None:
         json.dumps({"task_name": "case-a", "trial_name": "a-1", "verifier_result": {"rewards": {"reward": 1.0}}})
     )
     (prior / "case-b" / "result.json").write_text(
-        json.dumps({"task_name": "case-b", "trial_name": "b-1", "exception_info": {"exception_type": "EnvironmentError"}})
+        json.dumps(
+            {"task_name": "case-b", "trial_name": "b-1", "exception_info": {"exception_type": "EnvironmentError"}}
+        )
     )
     current = tmp_path / "attempt-2" / "jobs"
     resumed = current / "job" / "case-b"
@@ -1299,7 +1302,13 @@ def test_score_parser_missing_tasks_only_reports_unfinished(tmp_path: Path) -> N
         trial = prior / name
         trial.mkdir(parents=True)
         (trial / "result.json").write_text(
-            json.dumps({"task_name": f"ns/task-{name}__{name}", "trial_name": name, "verifier_result": {"rewards": {"reward": reward}}})
+            json.dumps(
+                {
+                    "task_name": f"ns/task-{name}__{name}",
+                    "trial_name": name,
+                    "verifier_result": {"rewards": {"reward": reward}},
+                }
+            )
         )
     planned = tmp_path / "planned.txt"
     planned.write_text("case-a\ncase-b\ncase-c\n")

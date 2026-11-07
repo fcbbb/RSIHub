@@ -73,11 +73,7 @@ def _expected_trials(run_dir: Path, env_values: dict[str, str]) -> int:
 
 def _resume_roots(primary: Path) -> list[Path]:
     """Prior-attempt job roots followed by this invocation's jobs directory."""
-    roots = [
-        Path(entry)
-        for entry in os.environ.get("EVOLVE_RESUME_JOBS_ROOTS", "").split(os.pathsep)
-        if entry.strip()
-    ]
+    roots = [Path(entry) for entry in os.environ.get("EVOLVE_RESUME_JOBS_ROOTS", "").split(os.pathsep) if entry.strip()]
     if primary not in roots:
         roots.append(primary)
     return roots
@@ -87,9 +83,7 @@ def _task_identity(task_name: str, expected: set[str]) -> str:
     """Map a Harbor-qualified task name back to its frozen dataset identity."""
     if task_name in expected:
         return task_name
-    matches = [
-        name for name in expected if task_name.endswith(f"__{name}") or task_name.endswith(f"/{name}")
-    ]
+    matches = [name for name in expected if task_name.endswith(f"__{name}") or task_name.endswith(f"/{name}")]
     return matches[0] if len(matches) == 1 else task_name
 
 
@@ -106,11 +100,7 @@ def _missing_tasks(argv: list[str]) -> int:
     env_values = _load_eval_env(Path("evaluator") / "eval.env")
     attempts = max(1, int(env_values.get("EVOLVE_HARBOR_ATTEMPTS", "1")))
     reward_schema = env_values.get("EVOLVE_REWARD_SCHEMA", "scalar")
-    roots = [
-        Path(entry)
-        for entry in os.environ.get("EVOLVE_RESUME_JOBS_ROOTS", "").split(os.pathsep)
-        if entry.strip()
-    ]
+    roots = [Path(entry) for entry in os.environ.get("EVOLVE_RESUME_JOBS_ROOTS", "").split(os.pathsep) if entry.strip()]
     expected = set(planned)
     counts: dict[str, int] = {}
     for trial in _load_task_trials(roots, reward_schema=reward_schema):

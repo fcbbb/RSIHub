@@ -104,7 +104,9 @@ not reuse a placeholder in a real benchmark.
 
 ## Supported launcher overrides
 
-The repository launch scripts accept these user-facing overrides:
+The repository launch scripts accept these user-facing overrides. They apply to
+every recipe launched through `scripts/run_recipe_demo.sh`, not only to
+ReviewBench; recipe-specific presets merely supply defaults for some of them.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -115,6 +117,18 @@ The repository launch scripts accept these user-facing overrides:
 | `EVOLVE_ASSET_DIR` | `.evolve-assets/terminal-bench-2.0` | reusable dataset and prepared subset location |
 | `EVOLVE_ASSET_ROOT` | `<repo>/.evolve-assets` | shared root where `fetch_dataset.sh` stores one directory per dataset |
 | `DATASET_PATH` | unset | use this local Harbor task directory and skip the pinned Terminal-Bench subset |
+| `MODE` | `run` | `run` executes the generation loop; `eval` evaluates gen/0 once |
+| `PRE_INIT_HOOK` | unset | shell command run before `evolve init` |
+| `PREPARE_HOOK` | unset | shell command run after `evolve init` and before preflight |
+| `PATCH_SIDECAR_DNS` | `1` | set to `0` to skip the ReviewBench Harbor sidecar DNS patch |
+| `REFRESH_RUNTIME_PIN` | `1` | set to `0` to keep the runtime pin from initialization |
+
+Hooks run in the configured `uv` environment. They may print `KEY=VALUE` lines
+on stdout; the launcher exports each line before preflight and evaluation. Use
+that channel for runtime credentials instead of putting them on a command line.
+Diagnostics belong on stderr. The ReviewBench preset uses this to derive
+`RB_HARBOR_OPENAI_API_KEY`, refresh the runtime pin, and patch Harbor's egress
+sidecar; see the [ReviewBench guide](../guides/reviewbench.md).
 
 Example:
 
@@ -217,6 +231,15 @@ cause HTTP clients to fail before a model request is made.
 Do not copy another machine's proxy or `NO_PROXY` values. They are
 host/network-specific.
 
+Docker CLI proxy settings are separate from the host variables above. If
+`/etc/docker/daemon.json` carries a stale proxy, point `DOCKER_CONFIG` at a
+directory whose `config.json` clears it, or use the bundled empty-proxy config:
+
+```bash
+DOCKER_CONFIG="$PWD/scripts/reviewbench/docker-config" \
+  ./scripts/reviewbench/run.sh --dataset /path/to/reviewbench
+```
+
 ## Variables managed by RSIHub
 
 Variables such as the following are generated for an individual operator or
@@ -231,6 +254,8 @@ EVOLVE_RUN_PLAN
 EVOLVE_EVAL_SPLIT
 EVOLVE_HARBOR_TASK_FILE
 EVOLVE_HARBOR_EXPECTED_TRIALS
+EVOLVE_HARBOR_AGENT_ALLOWED_HOSTS
+EVOLVE_RESUME_JOBS_ROOTS
 EVOLVE_CANDIDATE_SOURCE
 ```
 

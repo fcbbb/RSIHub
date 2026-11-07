@@ -101,6 +101,7 @@ class HarborRollout(RolloutOperator):
         jobs_dir = jobs_root / f"gen-{ctx.genid}"
         _reset_directory(jobs_dir)
 
+        agent_allowed_hosts = str(eval_env.get("EVOLVE_HARBOR_AGENT_ALLOWED_HOSTS") or "").split()
         base_command = [
             *harbor,
             "run",
@@ -108,6 +109,7 @@ class HarborRollout(RolloutOperator):
             tasks,
             "--agent",
             agent,
+            *[item for host in agent_allowed_hosts for item in ("--allow-agent-host", host)],
             "--ae",
             f"EVOLVE_CANDIDATE_SOURCE={(checkout / 'target').resolve()}",
             "--n-attempts",

@@ -170,3 +170,28 @@ def test_normalize_evaluator_config_rejects_legacy_candidate_runtime() -> None:
         config_module.normalize_evaluator_config(
             {"candidate_runtime": {"variant": "uv", "project": "target", "python": "3.12"}}
         )
+
+
+def test_agent_allowed_hosts_are_normalized() -> None:
+    from evolve.workspace import _evaluator_agent_allowed_hosts
+
+    assert _evaluator_agent_allowed_hosts(
+        {"agent_allowed_hosts": ["Model.Example.COM.", "10.0.0.0/8"]}
+    ) == ["model.example.com", "10.0.0.0/8"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "model.example.com",
+        ["model.example.com:8080"],
+        ["two words"],
+        [""],
+        [42],
+    ],
+)
+def test_agent_allowed_hosts_reject_invalid_entries(value: object) -> None:
+    from evolve.workspace import _evaluator_agent_allowed_hosts
+
+    with pytest.raises(ValueError, match="agent_allowed_hosts"):
+        _evaluator_agent_allowed_hosts({"agent_allowed_hosts": value})

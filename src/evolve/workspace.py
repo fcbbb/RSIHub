@@ -291,6 +291,7 @@ def _write_files(
             verifier_timeout_multiplier=verifier_timeout_multiplier,
             max_retries=max_retries,
             reward_schema=str(evaluator.get("reward_schema", "scalar")),
+            agent_allowed_hosts=_evaluator_agent_allowed_hosts(evaluator),
         ),
         "evaluator/agent.env": _agent_env(evaluator.get("agent_env")),
         "evaluator/verifier.env": _agent_env(evaluator.get("verifier_env")),
@@ -414,12 +415,39 @@ def _component_manifest(
     }
 
 
+def _evaluator_agent_allowed_hosts(evaluator: dict[str, Any]) -> list[str]:
+    """Validate the run-specific hosts added to the agent-phase allowlist.
+
+    Benchmarks deliberately do not carry deployment endpoints in their
+    ``task.toml``; upstream runners inject the model host at runtime (Harbor
+    ``--allow-agent-host``, Pier per-agent allowlists).  These hosts are frozen
+    into ``evaluator/eval.env`` and forwarded by the engine at run time.
+    """
+    raw = evaluator.get("agent_allowed_hosts")
+    if raw is None:
+        return []
+    if isinstance(raw, str) or not isinstance(raw, (list, tuple)):
+        raise ValueError("evaluator.agent_allowed_hosts must be a list of hostnames")
+    for host in raw:
+        if not isinstance(host, str):
+            raise ValueError("evaluator.agent_allowed_hosts entries must be strings")
+        if not host.strip() or host != host.strip() or any(character.isspace() for character in host):
+            raise ValueError("evaluator.agent_allowed_hosts entries must be non-empty single-line hostnames")
+    from harbor.models.task.config import normalize_allowed_hosts
+
+    try:
+        return normalize_allowed_hosts([str(host) for host in raw])
+    except ValueError as error:
+        raise ValueError(f"evaluator.agent_allowed_hosts is invalid: {error}") from error
+
+
 def _validate_evaluator_config(evaluator: dict[str, Any]) -> None:
     normalize_evaluator_config(evaluator)
     engine = str(evaluator.get("engine") or "")
     _evaluator_scaffold(engine, "engine.sh")
     if engine == "harbor" and not evaluator.get("agent"):
         raise ValueError("evaluator.agent is required for harbor recipes")
+    _evaluator_agent_allowed_hosts(evaluator)
     reward_schema = str(evaluator.get("reward_schema", "scalar"))
     if reward_schema not in {"scalar", "reviewbench"}:
         raise ValueError("evaluator.reward_schema must be 'scalar' or 'reviewbench'")
@@ -774,6 +802,7 @@ def _eval_env(
     verifier_timeout_multiplier: float = 1,
     max_retries: int = 0,
     reward_schema: str = "scalar",
+    agent_allowed_hosts: list[str] | None = None,
 ) -> str:
     expected_trials = tasks_per_round * max(trials, 1)
     text = (
@@ -803,6 +832,8 @@ def _eval_env(
         text += f"EVOLVE_REWARD_SCHEMA={reward_schema}\n"
     if model:
         text += f"EVOLVE_HARBOR_MODEL={shlex.quote(model)}\n"
+    if agent_allowed_hosts:
+        text += f"EVOLVE_HARBOR_AGENT_ALLOWED_HOSTS={shlex.quote(' '.join(agent_allowed_hosts))}\n"
     return text + (f"EVOLVE_HARBOR_TASK_FILE={shlex.quote(task_file)}\n" if task_file else "")
 
 

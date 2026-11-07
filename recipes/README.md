@@ -9,6 +9,9 @@ represents.
 - [Agentic Harness Engineering](ahe/README.md)
 - [Agentic Harness Engineering for Codex](ahe_codex/README.md)
 - [Agentic Harness Engineering for DeepSeek Harness](ahe_dsh/README.md)
+- [Agentic Harness Engineering on ReviewBench](ahe_dsh_reviewbench/README.md)
+- [Agentic Harness Engineering on SWE-Atlas unit tests](ahe_dsh_sweatlas/README.md)
+- [Agentic Harness Engineering on deep-swe](ahe_dsh_deepswe/README.md)
 - [GEPA](gepa/README.md)
 - [GEPA, fully local](gepa_local/README.md)
 - [Hill Climb](hill_climb/README.md)
@@ -20,9 +23,15 @@ represents.
 - [HyperAgents for Codex on full Terminal-Bench 2.0](hyperagents_codex_tbench_full/README.md)
 
 Main recipes use the shared, content-pinned Terminal-Bench 2.0 subset, except
-the two `*_tbench_full` profiles, which freeze all 89 official tasks. The setup
-script downloads and verifies the source dataset and builds only the selected
-recipe's pinned MiniSWE, Codex, or dsh-headless mutation-agent image:
+the two `*_tbench_full` profiles, which freeze all 89 official tasks.
+`ahe_dsh_reviewbench` instead evaluates a user-supplied ReviewBench Harbor
+export; `ahe_dsh_sweatlas` and `ahe_dsh_deepswe` evaluate SWE-Atlas unit-test
+and deep-swe coding datasets respectively. All three use the same dsh mutation
+image but not the Terminal-Bench assets, and all three inject the model host
+into the agent-phase allowlist at run time with
+`evaluator.agent_allowed_hosts`.
+The setup script downloads and verifies the source dataset and builds only the
+selected recipe's pinned MiniSWE, Codex, or dsh-headless mutation-agent image:
 
 ```bash
 ./scripts/setup_terminal_bench.sh gepa
@@ -33,6 +42,13 @@ recipe's pinned MiniSWE, Codex, or dsh-headless mutation-agent image:
 ./scripts/run_recipe_demo.sh hyperagents_codex_tbench_full
 ./scripts/setup_terminal_bench.sh ahe_dsh
 ./scripts/run_recipe_demo.sh ahe_dsh
+```
+
+The ReviewBench recipe reuses the dsh image but takes a local dataset path:
+
+```bash
+./scripts/setup_terminal_bench.sh ahe_dsh
+./scripts/reviewbench/run.sh --dataset /path/to/reviewbench --smoke
 ```
 
 Set `EVOLVE_ASSET_DIR` to place the reusable dataset outside the default

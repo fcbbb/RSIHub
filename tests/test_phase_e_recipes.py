@@ -10,6 +10,9 @@ SUPPORTED_RECIPES = {
     "ahe",
     "ahe_codex",
     "ahe_dsh",
+    "ahe_dsh_deepswe",
+    "ahe_dsh_reviewbench",
+    "ahe_dsh_sweatlas",
     "gepa",
     "gepa_local",
     "hill_climb",
@@ -22,7 +25,18 @@ SUPPORTED_RECIPES = {
 }
 UV_SOURCE_RECIPES = {"ahe", "hill_climb", "hyperagents", "hyperagents_tbench_full"}
 LOCAL_MUTATE_RECIPES = {"hyperagents_dsh"}
-MAIN_RECIPES = SUPPORTED_RECIPES - {"gepa_local"}
+MAIN_RECIPES = SUPPORTED_RECIPES - {
+    "gepa_local",
+    "ahe_dsh_reviewbench",
+    "ahe_dsh_sweatlas",
+    "ahe_dsh_deepswe",
+}
+DSH_RECIPES = {
+    "ahe_dsh",
+    "ahe_dsh_reviewbench",
+    "ahe_dsh_sweatlas",
+    "ahe_dsh_deepswe",
+}
 TERMINAL_BENCH_DATASET = "terminal-bench-2-30-v1"
 CODEX_IMAGE = "evolve-mutate-codex:20260818-codex0146"
 CODEX_FULL_IMAGE = "evolve-mutate-codex:20260904-codex0149"
@@ -115,6 +129,33 @@ def test_supported_recipes_use_harbor_and_method_mutate() -> None:
             "record": "jsonl",
         },
         "ahe_dsh": {
+            "select": "ahe_latest",
+            "rollout": "parent_evaluation",
+            "analyze": "ahe",
+            "mutate": "ahe",
+            "validate": "node_check",
+            "gate": "ahe_artifact_valid",
+            "record": "jsonl",
+        },
+        "ahe_dsh_reviewbench": {
+            "select": "ahe_latest",
+            "rollout": "parent_evaluation",
+            "analyze": "ahe",
+            "mutate": "ahe",
+            "validate": "node_check",
+            "gate": "ahe_artifact_valid",
+            "record": "jsonl",
+        },
+        "ahe_dsh_sweatlas": {
+            "select": "ahe_latest",
+            "rollout": "parent_evaluation",
+            "analyze": "ahe",
+            "mutate": "ahe",
+            "validate": "node_check",
+            "gate": "ahe_artifact_valid",
+            "record": "jsonl",
+        },
+        "ahe_dsh_deepswe": {
             "select": "ahe_latest",
             "rollout": "parent_evaluation",
             "analyze": "ahe",
@@ -235,7 +276,7 @@ def test_supported_recipes_use_harbor_and_method_mutate() -> None:
                 if name == "hyperagents_tbench_full"
                 else "codex"
             )
-        elif name == "ahe_dsh":
+        elif name in DSH_RECIPES:
             assert config["target"]["seed"] == "builtin-dsh-harbor"
             assert mutate["runner"] == "harbor"
             assert mutate["agent"] == "evolve.integrations.harbor.dsh_container:DshContainerAgent"
@@ -254,19 +295,20 @@ def test_supported_recipes_use_harbor_and_method_mutate() -> None:
 
 
 def test_codex_mutates_use_the_preinstalled_codex_image() -> None:
-    for name in MAIN_RECIPES - {"hyperagents_tbench_full", "ahe_dsh"} - LOCAL_MUTATE_RECIPES:
+    for name in MAIN_RECIPES - {"hyperagents_tbench_full"} - LOCAL_MUTATE_RECIPES - DSH_RECIPES:
         expected = CODEX_FULL_IMAGE if name == "hyperagents_codex_tbench_full" else CODEX_IMAGE
         assert _operator_config(name, "mutate")["image"] == expected
 
 
 def test_dsh_mutate_uses_the_headless_mutation_image() -> None:
-    mutate = _operator_config("ahe_dsh", "mutate")
-    assert mutate["image"] == DSH_IMAGE
-    assert mutate["runner"] == "harbor"
-    assert mutate["agent"] == "evolve.integrations.harbor.dsh_container:DshContainerAgent"
-    debugger = _operator_config("ahe_dsh", "analyze")["debugger"]
-    assert debugger["image"] == DSH_IMAGE
-    assert debugger["agent_kwargs"]["role"] == "analyst"
+    for name in sorted(DSH_RECIPES):
+        mutate = _operator_config(name, "mutate")
+        assert mutate["image"] == DSH_IMAGE
+        assert mutate["runner"] == "harbor"
+        assert mutate["agent"] == "evolve.integrations.harbor.dsh_container:DshContainerAgent"
+        debugger = _operator_config(name, "analyze")["debugger"]
+        assert debugger["image"] == DSH_IMAGE
+        assert debugger["agent_kwargs"]["role"] == "analyst"
 
 
 def test_terminal_bench_method_recipes_use_full_curated_dataset() -> None:
@@ -357,21 +399,31 @@ def test_shared_optimization_recipes_use_native_candidate_agent_timeout() -> Non
         assert evaluator["agent_timeout_multiplier"] == 1
 
 
-def test_all_explicit_recipe_retry_and_multiplier_values_are_one() -> None:
-    def walk(value):
+def test_explicit_recipe_retry_and_multiplier_values_stay_conservative() -> None:
+    # ReviewBench task.toml ships a 900 s agent limit and needs 1800 s for a dsh
+    # rollout. SWE-Atlas budgets 900 s for a verifier that runs mutation testing
+    # plus one LLM call per rubric. Every other public recipe keeps native
+    # timeouts.
+    timeout_headroom = {
+        ("ahe_dsh_reviewbench", "agent_timeout_multiplier"): 2,
+        ("ahe_dsh_sweatlas", "verifier_timeout_multiplier"): 3,
+    }
+
+    def walk(value, recipe: str):
         if isinstance(value, dict):
             for key, item in value.items():
                 if "retry" in key or "retries" in key or "multiplier" in key:
                     expected = 2 if key == "debugger_max_retries" else 1
+                    expected = timeout_headroom.get((recipe, key), expected)
                     assert item == expected, f"{key} must be {expected}, got {item!r}"
-                walk(item)
+                walk(item, recipe)
         elif isinstance(value, list):
             for item in value:
-                walk(item)
+                walk(item, recipe)
 
     for name in RECIPE_NAMES:
         config = _parsed_config(name)
-        walk(config)
+        walk(config, name)
         assert "infra_repair_attempts" not in _config(name)
 
 

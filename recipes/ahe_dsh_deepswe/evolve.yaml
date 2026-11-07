@@ -1,0 +1,97 @@
+experiment:
+  id: ahe_dsh_deepswe
+  max_generations: 10
+  target_score: null
+  children_per_gen: 1
+  mode: driver
+  seed: 0
+
+target:
+  seed: builtin-dsh-harbor
+
+surface:
+  include: [target/**]
+  exclude:
+    - target/agent.py
+    - target/dsh_trajectory.py
+    - target/runners/**
+
+operators:
+  select:
+    operator: ahe_latest
+    timeout_s: 600
+    config: {}
+  rollout:
+    operator: parent_evaluation
+    timeout_s: 600
+    config: {field_limit: 2000}
+  analyze:
+    operator: ahe
+    timeout_s: 3600
+    config:
+      max_tasks: 30
+      max_concurrent: 10
+      timeout_per_task: 900
+      retry_attempts: 1
+      field_limit: 2000
+      # deep-swe rewards are binary: f2p and p2p must both hold.
+      pass_threshold: 1.0
+      debugger:
+        runner: harbor
+        agent: evolve.integrations.harbor.dsh_container:DshContainerAgent
+        model: openai/deepseek-v4.1-flash-1017
+        environment: docker
+        image: evolve-mutate-dsh:20261104-dsh021rc5
+        agent_kwargs: {role: analyst, version: 0.2.1-rc.5}
+        agent_env: {DSH_CONTEXT_WINDOW: "1000000"}
+  mutate:
+    operator: ahe
+    timeout_s: 3600
+    config:
+      runner: harbor
+      expose_gate_data: false
+      agent: evolve.integrations.harbor.dsh_container:DshContainerAgent
+      model: openai/deepseek-v4.1-flash-1017
+      environment: docker
+      image: evolve-mutate-dsh:20261104-dsh021rc5
+      editable_roots: [target]
+      prompt_path: target/profile.cordis.yml
+      agent_kwargs: {role: mutate, version: 0.2.1-rc.5}
+      agent_env: {DSH_CONTEXT_WINDOW: "1000000"}
+      max_retries: 1
+  validate:
+    operator: node_check
+    timeout_s: 300
+    config: {}
+  gate:
+    operator: ahe_artifact_valid
+    timeout_s: 600
+    config: {}
+  record:
+    operator: jsonl
+    timeout_s: 600
+    config: {}
+  timeout_s: 600
+
+evaluator:
+  engine: harbor
+  model: openai/deepseek-v4.1-flash-1017
+  dataset: /home/fcbbb/RSI/benchmark/deep-swe/tasks
+  agent: target.agent:DshAgent
+  task_scope: full
+  evaluation_split: train
+  sampling: static
+  tasks_per_round: 113
+  repetitions: 1
+  # Every trial runs an agent container plus a separate verifier container.
+  n_concurrent: 4
+  max_retries: 1
+  benchmark_timeout_is_zero: true
+  partial_floor: 1.0
+  # Deep-swe's verifier environment is `no-network` and needs no LLM judge;
+  # only the agent phase needs the model host, which task.toml blocks.
+  agent_allowed_hosts:
+    - token-plan.cn-beijing.maas.aliyuncs.com
+  agent_env:
+    DSH_TASK_TIMEOUT_SEC: "10800"
+    DSH_RUNTIME_IMAGE: evolve-mutate-dsh:20261104-dsh021rc5

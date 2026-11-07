@@ -51,6 +51,16 @@ if (!taskFile) {
   console.error("DSH_TASK_FILE is required");
   process.exit(64);
 }
+// dsh's lib/bin.js self-dispatches through `import.meta.main`, which older
+// Node releases leave undefined: the child then exits 0 without reading the
+// JSON-RPC stream and the await below never settles (Node exit 13). Same test,
+// same runtime, so this catches exactly what the child would hit.
+if (import.meta.main === undefined) {
+  console.error(
+    `Node ${process.versions.node} does not expose import.meta.main; dsh needs >= 22.19 (or >= 24.2)`,
+  );
+  process.exit(64);
+}
 
 const instruction = readFileSync(taskFile, "utf8");
 const args = [dbin, "--profile", "sdk-minimal"];
@@ -152,6 +162,9 @@ function finish(code) {
   if (lastAssistant) writeSync(1, `${lastAssistant}\n`);
   child.stdin.end();
   child.kill("SIGTERM");
+  // finish() is also called from the child's own exit handler; waiting for an
+  // exit event that already fired would stall for the hard-exit timeout.
+  if (child.exitCode !== null || child.signalCode !== null) process.exit(code);
   // Keep the loop alive until the child is gone, then escalate. Without the
   // ref'd fallback a dsh that ignores SIGTERM would hang the Harbor agent
   // until the outer agent timeout instead of reporting this runner's code.
@@ -171,11 +184,17 @@ const timer = setTimeout(() => {
 }, timeoutSec * 1000);
 timer.unref();
 
-child.on("exit", (code) => {
-  if (!finishing && code !== 0 && turnEnd === null) {
-    writeSync(2, `dsh runtime exited ${code} before turn end\n`);
-    finish(code || 70);
+child.on("exit", (code, signal) => {
+  if (finishing || turnEnd !== null) return;
+  // A silent exit 0 means dsh never handled `initialize` (on Node < 22.19 its
+  // entry point is a no-op); report it instead of leaving the await unsettled.
+  if (code === 0) {
+    writeSync(2, "dsh runtime exited 0 before turn end without answering initialize\n");
+    finish(70);
+    return;
   }
+  writeSync(2, `dsh runtime exited ${code ?? signal} before turn end\n`);
+  finish(code || 70);
 });
 
 try {

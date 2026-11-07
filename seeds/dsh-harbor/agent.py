@@ -7,10 +7,10 @@ results. Per trial it:
 
 1. resolves the candidate profile from ``EVOLVE_CANDIDATE_SOURCE``
    (= ``<eval-checkout>/target``, injected by the harbor engine),
-2. in ``install()`` uploads ``@deepseek-ai/dsh`` (plus Node only when the task
-   image has none) from ``DSH_RUNTIME_IMAGE`` (the locally built dsh image) or
-   a pre-extracted ``DSH_RUNTIME_DIR`` and extracts it under
-   ``/opt/evolve-dsh``,
+2. in ``install()`` uploads ``@deepseek-ai/dsh`` (plus Node when the task image
+   has none or one older than 22.19) from ``DSH_RUNTIME_IMAGE`` (the locally
+   built dsh image) or a pre-extracted ``DSH_RUNTIME_DIR`` and extracts it
+   under ``/opt/evolve-dsh``,
 3. in ``run()`` uploads the candidate tree and cordis patches and executes
    ``runners/sdk_minimal_run.mjs`` inside the container, which drives
    ``dsh --profile sdk-minimal`` over its JSON-RPC stdio protocol,
@@ -68,6 +68,14 @@ CONTAINER_DSH_BIN = f"{CONTAINER_RUNTIME_ROOT}/dsh/lib/bin.js"
 CONTAINER_NODE = "/usr/local/bin/node"
 RUNTIME_IMAGE_ENV = "DSH_RUNTIME_IMAGE"
 RUNTIME_DIR_ENV = "DSH_RUNTIME_DIR"
+
+# `@deepseek-ai/dsh`'s `lib/bin.js` self-dispatches on `import.meta.main`, which
+# Node only exposes from 22.19 (and 24.2+). On an older runtime that expression
+# is `undefined`, so dsh prints nothing, does nothing, and exits 0 -- the runner
+# then dies with an unsettled top-level await (Node exit 13) instead of a useful
+# error. The capability is probed directly instead of comparing version numbers
+# so 23.x/24.0/24.1 installs are judged by what they actually support.
+NODE_FEATURE_PROBE = "node --input-type=module -e 'process.stdout.write(String(import.meta.main))'"
 
 # Fixed container paths used by run(): the adapter stages its files here and
 # never depends on the host layout or on a docker-exec shell bridge.
@@ -314,13 +322,14 @@ done
         )
         await self._ensure_node(environment, docker_bin, image, runtime_dir)
 
+    @staticmethod
+    async def _node_ready(environment) -> bool:
+        """True when the container's ``node`` can actually boot dsh."""
+        probe = await environment.exec(NODE_FEATURE_PROBE)
+        return probe.return_code == 0 and (probe.stdout or "").strip() == "true"
+
     async def _ensure_node(self, environment, docker_bin: str, image: str | None, runtime_dir: str | None) -> None:
-        probe = await environment.exec("node --version")
-        major = None
-        if probe.return_code == 0:
-            match = re.search(r"v(\d+)\.", probe.stdout or "")
-            major = int(match.group(1)) if match else None
-        if major is not None and major >= 22:
+        if await self._node_ready(environment):
             return
         host_node: Path | None = None
         if runtime_dir:
@@ -332,12 +341,18 @@ done
                 docker_bin = resolve_docker_bin(env={**os.environ, **self._extra_env})
             host_node = await asyncio.to_thread(_node_from_image, docker_bin, image)
         if host_node is None or not host_node.is_file():
-            raise RuntimeError("task container has no Node >= 22 and no Node binary is available to stage")
+            raise RuntimeError(
+                "task container has no Node able to run dsh (needs import.meta.main, "
+                "i.e. >= 22.19) and no Node binary is available to stage"
+            )
         await environment.upload_file(str(host_node), "/tmp/evolve-node")
         await self.exec_as_root(environment, f"install -m 755 /tmp/evolve-node {CONTAINER_NODE}")
-        check = await environment.exec("node --version")
-        if check.return_code != 0:
-            raise RuntimeError(f"staged Node is unusable in the task container: {check.stderr.strip()}")
+        if not await self._node_ready(environment):
+            check = await environment.exec("node --version")
+            raise RuntimeError(
+                f"staged Node {check.stdout.strip() or '<unknown>'} cannot run dsh "
+                "(needs import.meta.main, i.e. Node >= 22.19)"
+            )
 
     def get_version_command(self) -> str | None:
         return f"node {CONTAINER_DSH_BIN} --version"

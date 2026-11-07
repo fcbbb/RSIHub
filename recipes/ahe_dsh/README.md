@@ -34,6 +34,13 @@ that container. The host therefore needs:
 - The `evolve-mutate-dsh` runtime image (built below).
 - **No** host Node runtime and **no** dsh Python SDK for the candidate path.
 
+The task image's own Node is reused only when it is **22.19 or newer**; dsh's
+`lib/bin.js` self-dispatches on `import.meta.main`, which older releases leave
+undefined (dsh then exits 0 without processing the JSON-RPC stream). When the
+image has no Node or an older one, `install()` stages the runtime image's Node
+into `/usr/local/bin/node` and the runner rejects anything still below 22.19
+with an explicit error.
+
 The preflight hook (`evaluator/prepare-runtime.sh`) verifies docker and the
 runtime image, then exports `DSH_RUNTIME_IMAGE` / `DSH_DOCKER_BIN` to every
 trial.

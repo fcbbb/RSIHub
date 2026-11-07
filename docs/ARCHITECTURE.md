@@ -53,7 +53,7 @@ decision (and usually a demolition pass) instead of silent sprawl.
 | `evaluation/contract.py` | 500 | resolve, hash, persist, and project the single authoritative evaluation contract identity |
 | `evaluation/diagnostics.py` | 375 | materialize missing trials and own bounded diagnostic projection and validation |
 | `evaluation/evidence.py` | 175 | evaluator-output reading, validation, and conversion into canonical trial results |
-| `evaluation/execution.py` | 480 | clean-checkout canonical evaluation: preflight gate, run plan, tree assertion, lifecycle, artifacts, and score parsing |
+| `evaluation/execution.py` | 600 | clean-checkout canonical evaluation: preflight gate, run plan, interrupted-round resume discovery, tree assertion, lifecycle, artifacts, and score parsing |
 | `evaluation/legacy.py` | 275 | read-only task-set identity compatibility for pre-contract workspaces |
 | `evaluation/results.py` | 250 | evaluation result types, outcome classification, and persisted record shape |
 | `evaluation/run_plan.py` | 100 | authoritative per-attempt task, trial-count, commit, and runtime plan |
@@ -138,7 +138,7 @@ each workspace, immutable there because it sits outside the mutable surface
 | `frozen/interfaces.py` | 375 | operator ABCs, registry, result schemas, and strict operator payload validation |
 | `frozen/sdk.py` | 350 | Python operator entrypoint and file-contract IO; no library algorithm policy |
 
-Total `src/evolve/` budget: **27530 lines**. The budget admits the read-only experiment viewer,
+Total `src/evolve/` budget: **27650 lines**. The budget admits the read-only experiment viewer,
 the explicit content-backed
 evaluation-contract boundaries, the opt-in in-place Harbor runtime, and the redacted trace-analysis
 boundary between rollout and feedback assembly; if the mechanism wants to

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
 import sys
 import tempfile
 import time
@@ -17,7 +19,7 @@ from ..execution_runtime import (
 from ..git import evaluator_tree, git, git_stdout
 from ..host_runtime import clean_python_env
 from ..preflight import PreflightFailureCategory, PreflightStatus, run_preflight
-from ..runtime import OwnedResult, attempt_dir, next_attempt, owned_attempt_id, run_owned
+from ..runtime import OwnedResult, attempt_dir, attempt_parent, next_attempt, owned_attempt_id, run_owned
 from ..runtime.environment import resolve_evaluator_runtime_environment, write_harbor_environment_inputs
 from ..runtime.uv import CandidateRuntimeResult, prepare_candidate_runtime
 from .contract import (
@@ -111,21 +113,6 @@ def evaluate(
                     selected_tasks=len(task_set.members) if task_set.members else None,
                 )
             runtime_fingerprint = hashlib.sha256((checkout / "evaluator" / "runtime.pin").read_bytes()).hexdigest()
-            if attempt is None:
-                attempt = next_attempt(
-                    workspace,
-                    purpose=purpose,
-                    generation=genid,
-                    candidate_commit=candidate_commit,
-                )
-            run_dir = attempt_dir(
-                workspace,
-                purpose=purpose,
-                generation=genid,
-                candidate_commit=candidate_commit,
-                attempt=attempt,
-            )
-            run_dir.mkdir(parents=True)
             run_plan = EvaluationRunPlan(
                 schema_version=1,
                 experiment_id=experiment_id(workspace),
@@ -142,6 +129,30 @@ def evaluate(
                 runtime_fingerprint=runtime_fingerprint,
                 execution_runtime_fingerprint=execution_runtime.receipt.fingerprint,
             )
+            # An interrupted round continues from the evidence earlier attempts
+            # of the same candidate already produced.  The plan identity above
+            # is the gate: any drift starts a clean attempt instead.
+            resume_sources: tuple[tuple[int, Path], ...] = ()
+            if attempt is None:
+                resume_sources = _resumable_attempt_roots(
+                    workspace,
+                    run_plan,
+                    contract_id=contract.contract_id if contract is not None else None,
+                )
+                attempt = next_attempt(
+                    workspace,
+                    purpose=purpose,
+                    generation=genid,
+                    candidate_commit=candidate_commit,
+                )
+            run_dir = attempt_dir(
+                workspace,
+                purpose=purpose,
+                generation=genid,
+                candidate_commit=candidate_commit,
+                attempt=attempt,
+            )
+            run_dir.mkdir(parents=True)
             run_plan_path = run_plan.write(run_dir / "run-plan.json")
             base: dict[str, Any] = {
                 "experiment_id": experiment_id(workspace),
@@ -154,6 +165,8 @@ def evaluate(
                 "runtime_fingerprint": runtime_fingerprint,
                 "expected_trials": expected,
             }
+            if resume_sources:
+                base["source_attempts"] = tuple(sorted({number for number, _ in resume_sources}))
             if contract is not None:
                 contract_path = run_dir / "evaluation-contract.json"
                 write_evaluation_contract(contract_path, contract)
@@ -271,6 +284,7 @@ def evaluate(
                                 clean_python_env(),
                                 runtime_root=workspace / "runs" / "runtime" / "execution",
                             ),
+                            resume_roots=tuple(root for _, root in resume_sources),
                         )
                         setup_outcome, setup_reason = read_setup_evidence(run_dir)
                         if not _runtime_selection_matches(run_dir, task_members):
@@ -339,6 +353,105 @@ def evaluate(
         finally:
             if cleanup_needed:
                 git(workspace, "worktree", "remove", "--force", str(checkout), check=False)
+
+
+_ATTEMPT_NAME = re.compile(r"attempt-(\d+)")
+
+
+def _attempt_number(path: Path) -> int:
+    match = _ATTEMPT_NAME.fullmatch(path.name)
+    return int(match.group(1)) if match else 0
+
+
+def _attempt_jobs_roots(attempt_path: Path) -> list[Path]:
+    """Every Harbor jobs directory one attempt produced, in run order."""
+    roots: list[Path] = []
+    default = attempt_path / "jobs"
+    if default.is_dir():
+        roots.append(default)
+    resumed = [
+        path
+        for path in attempt_path.iterdir()
+        if path.is_dir() and re.fullmatch(r"jobs-resume-\d+", path.name)
+    ] if attempt_path.is_dir() else []
+    roots.extend(sorted(resumed, key=lambda path: int(path.name.rsplit("-", 1)[1])))
+    return roots
+
+
+def _resumable_attempt_roots(
+    workspace: Path,
+    plan: EvaluationRunPlan,
+    *,
+    contract_id: str | None = None,
+) -> tuple[tuple[int, Path], ...]:
+    """Find job roots from earlier incomplete attempts of the same identity.
+
+    Only a matching run plan is resumable: the candidate commit, frozen task
+    set, evaluator/runtime fingerprints and per-task attempt count must all be
+    identical.  A completed attempt is never recycled, so an explicit retry of
+    a successful evaluation still runs from scratch.
+    """
+    parent = attempt_parent(
+        workspace,
+        purpose=plan.purpose,
+        generation=plan.generation,
+        candidate_commit=plan.candidate_commit,
+    )
+    if not parent.is_dir():
+        return ()
+    sources: list[tuple[int, Path]] = []
+    for attempt_path in sorted(parent.glob("attempt-*"), key=_attempt_number):
+        plan_path = attempt_path / "run-plan.json"
+        if not plan_path.is_file():
+            continue
+        try:
+            prior = EvaluationRunPlan.read(plan_path)
+        except (OSError, ValueError):
+            continue
+        if not _resume_identity_matches(prior, plan):
+            continue
+        if not _attempt_contract_matches(attempt_path, contract_id):
+            continue
+        try:
+            status = (attempt_path / "status").read_text().strip()
+        except OSError:
+            status = ""
+        if status == "complete":
+            continue
+        number = _attempt_number(attempt_path)
+        for jobs_root in _attempt_jobs_roots(attempt_path):
+            if next(jobs_root.rglob("result.json"), None) is not None:
+                sources.append((number, jobs_root))
+    return tuple(sources)
+
+
+def _resume_identity_matches(prior: EvaluationRunPlan, plan: EvaluationRunPlan) -> bool:
+    return (
+        prior.experiment_id == plan.experiment_id
+        and prior.generation == plan.generation
+        and prior.candidate_commit == plan.candidate_commit
+        and prior.purpose == plan.purpose
+        and prior.tasks == plan.tasks
+        and prior.attempts_per_task == plan.attempts_per_task
+        and prior.expected_trials == plan.expected_trials
+        and prior.evaluator_fingerprint == plan.evaluator_fingerprint
+        and prior.task_set_hash == plan.task_set_hash
+        and prior.runtime_fingerprint == plan.runtime_fingerprint
+        and prior.execution_runtime_fingerprint == plan.execution_runtime_fingerprint
+    )
+
+
+def _attempt_contract_matches(attempt_path: Path, contract_id: str | None) -> bool:
+    if contract_id is None:
+        return True
+    path = attempt_path / "evaluation-contract.json"
+    if not path.is_file():
+        return True
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(payload, dict) and payload.get("contract_id") == contract_id
 
 
 def _evaluation_artifact_reference(workspace: Path, run_dir: Path) -> dict[str, str] | None:
@@ -431,6 +544,7 @@ def _run_eval_script(
     runtime: CandidateRuntimeResult,
     run_plan_path: Path | None = None,
     process_environment: dict[str, str] | None = None,
+    resume_roots: tuple[Path, ...] = (),
 ) -> OwnedResult:
     runs_dir = next(parent for parent in run_dir.parents if parent.name == "runs")
     source_environment = clean_python_env()
@@ -456,6 +570,8 @@ def _run_eval_script(
     }
     if run_plan_path is not None:
         env["EVOLVE_RUN_PLAN"] = str(run_plan_path.resolve())
+    if resume_roots:
+        env["EVOLVE_RESUME_JOBS_ROOTS"] = os.pathsep.join(str(path.resolve()) for path in resume_roots)
     env["EVOLVE_EVAL_SPLIT"] = evaluation_split
     if runtime.variant is not None:
         env["EVOLVE_CANDIDATE_RUNTIME_ENV_JSON"] = runtime.environment_json()

@@ -198,6 +198,11 @@ def _attempt_parent(workspace: Path, purpose: str, generation: str, candidate_co
     return workspace / "runs/evaluations" / purpose / f"gen-{generation}" / f"candidate-{candidate_commit}"
 
 
+def attempt_parent(workspace: Path, *, purpose: str, generation: str, candidate_commit: str) -> Path:
+    """Return the directory that owns every attempt for one evaluation identity."""
+    return _attempt_parent(workspace, purpose, generation, candidate_commit)
+
+
 def attempt_dir(workspace: Path, *, purpose: str, generation: str, candidate_commit: str, attempt: int) -> Path:
     if attempt < 1:
         raise ValueError("attempt must be positive")

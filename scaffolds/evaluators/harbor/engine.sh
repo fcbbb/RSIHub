@@ -185,10 +185,24 @@ if ! mkdir -p "$EVOLVE_UV_CACHE_DIR" \
   exit 3
 fi
 jobs_dir="$EVOLVE_RUN_DIR/jobs"
-if ! mkdir "$jobs_dir"; then
-  printf 'jobs directory already exists: %s\n' "$jobs_dir" >&2
-  printf 'infra_failed\n' > "$EVOLVE_RUN_DIR/status"
-  exit 3
+if ! mkdir "$jobs_dir" 2>/dev/null; then
+  # A resumed attempt may leave the canonical jobs directory populated while
+  # this invocation only fills the missing trials.
+  if [ -z "${EVOLVE_RESUME_JOBS_ROOTS:-}" ]; then
+    printf 'jobs directory already exists: %s\n' "$jobs_dir" >&2
+    printf 'infra_failed\n' > "$EVOLVE_RUN_DIR/status"
+    exit 3
+  fi
+  resume_jobs_index=1
+  while [ -e "$EVOLVE_RUN_DIR/jobs-resume-$resume_jobs_index" ]; do
+    resume_jobs_index=$((resume_jobs_index + 1))
+  done
+  jobs_dir="$EVOLVE_RUN_DIR/jobs-resume-$resume_jobs_index"
+  if ! mkdir "$jobs_dir"; then
+    printf 'jobs directory already exists: %s\n' "$jobs_dir" >&2
+    printf 'infra_failed\n' > "$EVOLVE_RUN_DIR/status"
+    exit 3
+  fi
 fi
 if [ "${EVOLVE_CANDIDATE_SMOKE_MODE:-}" = "single" ]; then
   EVOLVE_HARBOR_N=1
@@ -253,6 +267,36 @@ if [ -n "${EVOLVE_TASK_LIMIT:-}" ] && [ -n "${EVOLVE_HARBOR_TASK_FILE:-}" ] \
   EVOLVE_HARBOR_TASK_FILE="$EVOLVE_RUN_DIR/task-names.txt"
   export EVOLVE_HARBOR_TASK_FILE
 fi
+# Resume: only run planned tasks that never produced final trial evidence.
+resume_skip_harbor=0
+resume_missing_count=
+if [ -n "${EVOLVE_RESUME_JOBS_ROOTS:-}" ]; then
+  resume_planned_tasks="$EVOLVE_RUN_DIR/run-plan-tasks.txt"
+  if [ ! -f "$resume_planned_tasks" ]; then
+    resume_planned_tasks=${EVOLVE_HARBOR_TASK_FILE:-}
+  fi
+  if [ -z "$resume_planned_tasks" ] || [ ! -f "$resume_planned_tasks" ]; then
+    printf 'resume requires the planned evaluation task file\n' >&2
+    printf 'infra_failed\n' > "$EVOLVE_RUN_DIR/status"
+    exit 3
+  fi
+  resume_missing="$EVOLVE_RUN_DIR/resume-tasks.txt"
+  if ! EVOLVE_RESUME_JOBS_ROOTS="${EVOLVE_RESUME_JOBS_ROOTS}${EVOLVE_RESUME_JOBS_ROOTS:+:}$jobs_dir" \
+    "$EVOLVE_FRAMEWORK_PYTHON" evaluator/parse_score.py --missing-tasks \
+    "$resume_planned_tasks" "$resume_missing"; then
+    printf 'resume task planning failed\n' >&2
+    printf 'infra_failed\n' > "$EVOLVE_RUN_DIR/status"
+    exit 3
+  fi
+  if [ ! -s "$resume_missing" ]; then
+    resume_skip_harbor=1
+    resume_missing_count=0
+  else
+    resume_missing_count=$(wc -l < "$resume_missing" | tr -d ' ')
+    EVOLVE_HARBOR_TASK_FILE="$resume_missing"
+    export EVOLVE_HARBOR_TASK_FILE
+  fi
+fi
 if [ -n "${EVOLVE_HARBOR_TASK_FILE:-}" ]; then
   while IFS= read -r task_name || [ -n "$task_name" ]; do
     case "$task_name" in
@@ -267,10 +311,22 @@ if [ -n "${EVOLVE_TASK_LIMIT:-}" ]; then
     effective_task_limit=$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))["tasks"]))' \
       "$EVOLVE_RUN_DIR/task-split.json")
   fi
-  set -- "$@" --n-tasks "$effective_task_limit"
-  export EVOLVE_HARBOR_EXPECTED_TRIALS=$((effective_task_limit * EVOLVE_HARBOR_ATTEMPTS))
+  if [ "${resume_skip_harbor:-0}" != 1 ]; then
+    if [ -n "${resume_missing_count:-}" ]; then
+      effective_task_limit=$resume_missing_count
+    fi
+    set -- "$@" --n-tasks "$effective_task_limit"
+    if [ -z "${resume_missing_count:-}" ]; then
+      export EVOLVE_HARBOR_EXPECTED_TRIALS=$((effective_task_limit * EVOLVE_HARBOR_ATTEMPTS))
+    fi
+  fi
 fi
 set -- "$@" --agent "$EVOLVE_HARBOR_AGENT"
+# Benchmarks do not carry deployment endpoints.  Merge the run-specific model
+# host(s) into the agent-phase allowlist exactly as upstream Harbor runners do.
+for agent_allowed_host in ${EVOLVE_HARBOR_AGENT_ALLOWED_HOSTS:-}; do
+  set -- "$@" --allow-agent-host "$agent_allowed_host"
+done
 if [ -n "${EVOLVE_HARBOR_ENVIRONMENT:-}" ]; then
   set -- "$@" --env "$EVOLVE_HARBOR_ENVIRONMENT"
 fi
@@ -413,12 +469,16 @@ for proxy_entry in \
   if [ -n "${proxy_entry#*=}" ]; then set -- "$@" --ae "$proxy_entry" --ve "$proxy_entry"; fi
 done
 set -- "$@" --job-name "$EVOLVE_ATTEMPT_ID" --jobs-dir "$jobs_dir" --n-attempts "${EVOLVE_HARBOR_ATTEMPTS:-1}" -n "${EVOLVE_HARBOR_N_CONCURRENT:-$EVOLVE_HARBOR_N}" -y -q
-if [ -n "${EVOLVE_CANDIDATE_SMOKE_MODE:-}" ]; then
+if [ "${resume_skip_harbor:-0}" = 1 ]; then
+  # Every planned trial already has final evidence; score the merged results
+  # without launching Harbor again.
+  printf 'resume: all planned trials already have final evidence\n' > "$EVOLVE_RUN_DIR/harbor.log"
+  harbor_rc=0
+elif [ -n "${EVOLVE_CANDIDATE_SMOKE_MODE:-}" ]; then
   run_shared_uv run --project "$EVOLVE_WORKSPACE" --frozen \
     --python "$EVOLVE_FRAMEWORK_PYTHON" sh -c 'umask 077; exec "$@"' sh harbor "$@"
   exit $?
-fi
-if [ "${EVOLVE_LIVE_OUTPUT:-0}" = "1" ]; then
+elif [ "${EVOLVE_LIVE_OUTPUT:-0}" = "1" ]; then
   live_fifo="$EVOLVE_RUN_DIR/.harbor-live.fifo"
   rm -f "$live_fifo"
   mkfifo "$live_fifo"

@@ -924,3 +924,106 @@ def test_trial_limits_do_not_turn_missing_or_partial_rewards_into_failures(tmp_p
     reason = harbor_execution._trial_stop_reason(jobs, {"failures": 1})
     assert reason["counts"] == {"errors": 0, "failures": 1}
     assert reason["reached"] == ["failures"]
+
+
+def _write_reviewbench_trial(
+    jobs_dir: Path,
+    *,
+    name: str,
+    counts: dict[str, int],
+    reward: float | None = None,
+    schema: bool = True,
+) -> Path:
+    trial = jobs_dir / name
+    trial.mkdir(parents=True)
+    rewards: dict[str, object] = {f"overall.{field}": value for field, value in counts.items()}
+    if schema:
+        rewards["rb_schema"] = 1
+    if reward is not None:
+        rewards["reward"] = reward
+    payload = {"trial_name": name, "task_name": f"harbor/{name}", "verifier_result": {"rewards": rewards}}
+    (trial / "result.json").write_text(json.dumps(payload))
+    return trial
+
+
+def _reviewbench_counts(**overrides: int) -> dict[str, int]:
+    counts = {
+        "candidate_count": 3,
+        "matched_count": 2,
+        "matched_tp_count": 2,
+        "unmatched_count": 1,
+        "unmatched_tp_count": 1,
+        "unmatched_fp_count": 0,
+        "golden_tp_count": 10,
+        "golden_covered_count": 2,
+    }
+    counts.update(overrides)
+    return counts
+
+
+def test_replay_rebuilds_reviewbench_augmented_f1_from_overall_counts(tmp_path: Path) -> None:
+    jobs = tmp_path / "jobs"
+    _write_reviewbench_trial(jobs, name="pr-1", counts=_reviewbench_counts())
+
+    [case] = harbor_evidence.collect_cases(jobs, pass_threshold=0.4)
+
+    # P = (2 + 1) / 3 = 1.0, R = (2 + 1) / (10 + 1) = 3/11, F1 = 3/7.
+    assert case["reward"] == pytest.approx(3 / 7)
+    assert case["outcome"] == "passed"
+
+
+def test_scalar_reward_takes_precedence_over_reviewbench_counts(tmp_path: Path) -> None:
+    jobs = tmp_path / "jobs"
+    _write_reviewbench_trial(jobs, name="pr-1", counts=_reviewbench_counts(), reward=0.9)
+
+    [case] = harbor_evidence.collect_cases(jobs)
+
+    assert case["reward"] == pytest.approx(0.9)
+
+
+def test_undefined_reviewbench_pr_takes_mean_of_defined_prs(tmp_path: Path) -> None:
+    jobs = tmp_path / "jobs"
+    _write_reviewbench_trial(
+        jobs,
+        name="pr-undefined",
+        counts=_reviewbench_counts(
+            candidate_count=0,
+            matched_count=0,
+            matched_tp_count=0,
+            unmatched_count=0,
+            unmatched_tp_count=0,
+            golden_covered_count=0,
+            golden_tp_count=1,
+        ),
+    )
+    _write_reviewbench_trial(
+        jobs,
+        name="pr-defined",
+        counts=_reviewbench_counts(
+            golden_tp_count=3,
+            golden_covered_count=3,
+            candidate_count=1,
+            matched_count=1,
+            matched_tp_count=1,
+            unmatched_count=0,
+            unmatched_tp_count=0,
+            unmatched_fp_count=0,
+        ),
+    )
+
+    by_name = {case["trial_name"]: case for case in harbor_evidence.collect_cases(jobs, pass_threshold=0.5)}
+
+    assert by_name["pr-defined"]["reward"] == pytest.approx(1.0)
+    assert by_name["pr-undefined"]["reward"] == pytest.approx(1.0)
+    assert by_name["pr-undefined"]["reward_imputed"] is True
+    assert by_name["pr-undefined"]["outcome"] == "passed"
+
+
+def test_counts_without_reviewbench_schema_stay_unscored(tmp_path: Path) -> None:
+    jobs = tmp_path / "jobs"
+    _write_reviewbench_trial(jobs, name="pr-1", counts=_reviewbench_counts(), schema=False)
+
+    [case] = harbor_evidence.collect_cases(jobs)
+
+    assert case["reward"] is None
+    assert case["outcome"] == "incomplete"

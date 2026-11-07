@@ -1162,3 +1162,162 @@ def test_harbor_shell_uses_canonical_parser_result() -> None:
     assert 'harbor "$@" 2>&1 | tee' not in text
     assert '> "$live_fifo" 2>&1 || harbor_rc=$?' in text
     assert 'sh -c \'umask 077; exec "$@"\' sh harbor "$@"' in text
+
+
+def test_eval_env_freezes_agent_allowed_hosts() -> None:
+    text = _eval_env(
+        "experiment",
+        "fixture",
+        n_concurrent=1,
+        tasks_per_round=1,
+        trials=1,
+        partial_floor=1.0,
+        agent="custom:Agent",
+        agent_allowed_hosts=["model.example.com", "10.0.0.0/8"],
+    )
+
+    assert "EVOLVE_HARBOR_AGENT_ALLOWED_HOSTS='model.example.com 10.0.0.0/8'\n" in text
+
+
+def test_engine_forwards_agent_allowed_hosts(tmp_path: Path) -> None:
+    evaluator = tmp_path / "evaluator"
+    evaluator.mkdir()
+    _write_executable(evaluator / "eval.sh", _eval_sh("harbor", "fixture"))
+    (evaluator / "eval.env").write_text(
+        _eval_env(
+            "experiment",
+            "fixture",
+            n_concurrent=1,
+            tasks_per_round=1,
+            trials=1,
+            partial_floor=1.0,
+            agent="custom:Agent",
+            agent_allowed_hosts=["model.example.com", "inference.example.org"],
+        )
+    )
+    (evaluator / "splits.json").write_text(json.dumps({"resolved": False}))
+    _write_evaluator_helpers(evaluator)
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    _write_fake_uv(fake_bin)
+    _write_executable(
+        fake_bin / "python3",
+        "#!/bin/sh\nexec \"$EVOLVE_FRAMEWORK_PYTHON\" \"$@\"\n",
+    )
+    _write_executable(
+        fake_bin / "harbor",
+        "#!/bin/sh\n"
+        'printf "%s\\n" "$@" > "$EVOLVE_RUN_DIR/harbor-args"\n'
+        "jobs_dir=\n"
+        'while [ "$#" -gt 0 ]; do\n'
+        '  if [ "$1" = --jobs-dir ]; then shift; jobs_dir=$1; fi\n'
+        "  shift || true\n"
+        "done\n"
+        'mkdir -p "$jobs_dir/trial"\n'
+        'printf \'%s\\n\' \'{"task_name":"task-a","trial_name":"trial","verifier_result":{"rewards":{"reward":1}}}\' > "$jobs_dir/trial/result.json"\n',
+    )
+    run_dir = tmp_path / "run"
+    env = {
+        **os.environ,
+        "HOME": str(tmp_path / "home"),
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        "EVOLVE_RUN_DIR": str(run_dir),
+        "EVOLVE_ATTEMPT_ID": "agent-host-test",
+        "EVOLVE_FRAMEWORK_PYTHON": sys.executable,
+        "EVOLVE_CANDIDATE_RUNTIME_ENV_JSON": "{}",
+        "EVOLVE_CANDIDATE_RUNTIME_MOUNTS_JSON": "[]",
+        "EVOLVE_HARBOR_EXTRA_DOCKER_COMPOSE_JSON": "[]",
+    }
+
+    result = subprocess.run(
+        [str(evaluator / "eval.sh")],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    arguments = (run_dir / "harbor-args").read_text().splitlines()
+    assert [
+        arguments[index + 1] for index, value in enumerate(arguments) if value == "--allow-agent-host"
+    ] == ["model.example.com", "inference.example.org"]
+
+
+def test_score_parser_merges_resumed_job_roots(tmp_path: Path) -> None:
+    evaluator = tmp_path / "evaluator"
+    evaluator.mkdir()
+    _write_evaluator_helpers(evaluator)
+    (evaluator / "eval.env").write_text("EVOLVE_HARBOR_EXPECTED_TRIALS=2\nEVOLVE_HARBOR_ATTEMPTS=1\n")
+
+    prior = tmp_path / "attempt-1" / "jobs" / "job"
+    (prior / "case-a").mkdir(parents=True)
+    (prior / "case-b").mkdir(parents=True)
+    (prior / "case-a" / "result.json").write_text(
+        json.dumps({"task_name": "case-a", "trial_name": "a-1", "verifier_result": {"rewards": {"reward": 1.0}}})
+    )
+    (prior / "case-b" / "result.json").write_text(
+        json.dumps({"task_name": "case-b", "trial_name": "b-1", "exception_info": {"exception_type": "EnvironmentError"}})
+    )
+    current = tmp_path / "attempt-2" / "jobs"
+    resumed = current / "job" / "case-b"
+    resumed.mkdir(parents=True)
+    (resumed / "result.json").write_text(
+        json.dumps({"task_name": "case-b", "trial_name": "b-2", "verifier_result": {"rewards": {"reward": 0.0}}})
+    )
+    run_dir = tmp_path / "attempt-2"
+    (run_dir / "run-plan.json").write_text(
+        json.dumps({"tasks": ["case-a", "case-b"], "expected_trials": 2, "attempts_per_task": 1})
+    )
+
+    result = subprocess.run(
+        [sys.executable, str(evaluator / "parse_score.py"), str(current), str(run_dir), "0"],
+        cwd=tmp_path,
+        env={**os.environ, "EVOLVE_RESUME_JOBS_ROOTS": str(prior.parent)},
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (run_dir / "status").read_text().strip() == "complete"
+    metrics = json.loads((run_dir / "metrics.json").read_text())["dimensions"]
+    assert metrics["completed_trials"] == 2
+    assert metrics["missing_trials"] == 0
+    vector = json.loads((run_dir / "task_vector.json").read_text())
+    assert [trial["status"] for trial in vector["tasks"]["case-b"]["trials"]] == ["benchmark_complete"]
+    assert metrics["pass_rate"] == 0.5
+
+
+def test_score_parser_missing_tasks_only_reports_unfinished(tmp_path: Path) -> None:
+    evaluator = tmp_path / "evaluator"
+    evaluator.mkdir()
+    _write_evaluator_helpers(evaluator)
+    (evaluator / "eval.env").write_text("EVOLVE_HARBOR_EXPECTED_TRIALS=3\nEVOLVE_HARBOR_ATTEMPTS=1\n")
+    prior = tmp_path / "attempt-1" / "jobs" / "job"
+    for name, reward in (("case-a", 1.0), ("case-b", 0.0)):
+        trial = prior / name
+        trial.mkdir(parents=True)
+        (trial / "result.json").write_text(
+            json.dumps({"task_name": f"ns/task-{name}__{name}", "trial_name": name, "verifier_result": {"rewards": {"reward": reward}}})
+        )
+    planned = tmp_path / "planned.txt"
+    planned.write_text("case-a\ncase-b\ncase-c\n")
+    output = tmp_path / "missing.txt"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(evaluator / "parse_score.py"),
+            "--missing-tasks",
+            str(planned),
+            str(output),
+        ],
+        cwd=tmp_path,
+        env={**os.environ, "EVOLVE_RESUME_JOBS_ROOTS": str(prior.parent)},
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert output.read_text().splitlines() == ["case-c"]

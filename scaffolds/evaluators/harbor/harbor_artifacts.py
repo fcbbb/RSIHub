@@ -55,17 +55,28 @@ def candidate_error_code(exception_info: object) -> str | None:
     return code if _SAFE_ERROR_CODE.fullmatch(code) else "candidate_invalid"
 
 
+def _jobs_roots(jobs_dirs: Path | list[Path] | tuple[Path, ...]) -> list[Path]:
+    if isinstance(jobs_dirs, Path):
+        return [jobs_dirs]
+    return [Path(path) for path in jobs_dirs]
+
+
 def collect_harbor_artifacts(
-    jobs_dir: Path, *, reward_schema: str = "scalar"
+    jobs_dirs: Path | list[Path] | tuple[Path, ...], *, reward_schema: str = "scalar"
 ) -> tuple[dict[str, Any], dict[str, Any], list[float]]:
-    trials = _load_task_trials(jobs_dir, reward_schema=reward_schema)
-    return _build_task_vector(trials), _build_artifact_index(jobs_dir, trials), _scoring_rewards(trials)
+    roots = _jobs_roots(jobs_dirs)
+    trials = _load_task_trials(roots, reward_schema=reward_schema)
+    return _build_task_vector(trials), _build_artifact_index(roots, trials), _scoring_rewards(trials)
 
 
-def write_harbor_artifacts(jobs_dir: Path, run_dir: Path, *, reward_schema: str = "scalar") -> list[float]:
-    _write_verifier_diagnostics(jobs_dir)
-    _write_replay_envelopes(jobs_dir, reward_schema=reward_schema)
-    task_vector, artifact_index, rewards = collect_harbor_artifacts(jobs_dir, reward_schema=reward_schema)
+def write_harbor_artifacts(
+    jobs_dirs: Path | list[Path] | tuple[Path, ...], run_dir: Path, *, reward_schema: str = "scalar"
+) -> list[float]:
+    roots = _jobs_roots(jobs_dirs)
+    for root in roots:
+        _write_verifier_diagnostics(root)
+        _write_replay_envelopes(root, reward_schema=reward_schema)
+    task_vector, artifact_index, rewards = collect_harbor_artifacts(roots, reward_schema=reward_schema)
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "task_vector.json").write_text(json.dumps(task_vector, indent=2, sort_keys=True) + "\n")
     (run_dir / "evaluation_artifacts.json").write_text(json.dumps(artifact_index, indent=2, sort_keys=True) + "\n")
@@ -340,7 +351,24 @@ def _impute_reviewbench_rewards(trials: list[dict[str, Any]]) -> None:
             trial["reward_imputed"] = True
 
 
-def _load_task_trials(jobs_dir: Path, *, reward_schema: str = "scalar") -> list[dict[str, Any]]:
+FINAL_TRIAL_STATUSES = frozenset({"benchmark_complete", "timeout", "candidate_invalid"})
+
+
+def _load_task_trials(
+    jobs_dirs: Path | list[Path] | tuple[Path, ...], *, reward_schema: str = "scalar"
+) -> list[dict[str, Any]]:
+    roots = _jobs_roots(jobs_dirs)
+    trials: list[dict[str, Any]] = []
+    for root_index, jobs_dir in enumerate(roots):
+        trials.extend(_load_root_trials(jobs_dir, reward_schema=reward_schema, root_index=root_index))
+    if len(roots) > 1:
+        trials = _merge_resumed_trials(trials)
+    if reward_schema == "reviewbench":
+        _impute_reviewbench_rewards(trials)
+    return sorted(trials, key=lambda trial: (str(trial["task_name"]), str(trial["trial_name"])))
+
+
+def _load_root_trials(jobs_dir: Path, *, reward_schema: str, root_index: int) -> list[dict[str, Any]]:
     if not jobs_dir.exists():
         return []
     verifier_timeout_is_final_zero = _verifier_timeout_is_final_zero(jobs_dir)
@@ -390,12 +418,61 @@ def _load_task_trials(jobs_dir: Path, *, reward_schema: str = "scalar") -> list[
                 "exception_message": exception_message,
                 "cost_usd": _cost_usd(result),
                 "trial_dir": trial_dir,
+                "jobs_root": jobs_dir,
+                "root_index": root_index,
+                "started_at": str(result.get("started_at") or ""),
                 "artifacts": _safe_artifacts(jobs_dir, trial_dir),
             }
         )
-    if reward_schema == "reviewbench":
-        _impute_reviewbench_rewards(trials)
-    return sorted(trials, key=lambda trial: (str(trial["task_name"]), str(trial["trial_name"])))
+    return trials
+
+
+def _merged_trial_order(trial: dict[str, Any]) -> tuple[int, str, str]:
+    return (int(trial["root_index"]), str(trial["started_at"]), str(trial["trial_name"]))
+
+
+def _merge_resumed_trials(trials: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Combine evidence from earlier attempts with the trials of this one.
+
+    A task keeps at most its configured number of trials.  Final trials are
+    preferred; when fewer than the configured number exist, the most recent
+    unfinished trials are retained so the evidence still explains the gap.
+    """
+    attempts = _planned_attempts(trials)
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for trial in trials:
+        grouped.setdefault(str(trial["task_name"]), []).append(trial)
+    merged: list[dict[str, Any]] = []
+    for entries in grouped.values():
+        final = sorted(
+            (entry for entry in entries if entry["status"] in FINAL_TRIAL_STATUSES), key=_merged_trial_order
+        )
+        pending = sorted(
+            (entry for entry in entries if entry["status"] not in FINAL_TRIAL_STATUSES), key=_merged_trial_order
+        )
+        kept = final[-attempts:] if len(final) > attempts else list(final)
+        remaining = attempts - len(kept)
+        if remaining > 0:
+            kept.extend(pending[-remaining:])
+        merged.extend(kept)
+    return merged
+
+
+def _planned_attempts(trials: list[dict[str, Any]]) -> int:
+    """Resolve the configured per-task trial count from the attempt run plan."""
+    for trial in trials:
+        root = trial.get("jobs_root")
+        if not isinstance(root, Path):
+            continue
+        try:
+            payload = json.loads((root.parent / "run-plan.json").read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(payload, dict):
+            attempts = payload.get("attempts_per_task")
+            if isinstance(attempts, int) and not isinstance(attempts, bool) and attempts >= 1:
+                return attempts
+    return 1
 
 
 def _build_task_vector(trials: list[dict[str, Any]]) -> dict[str, Any]:
@@ -423,9 +500,9 @@ def _build_task_vector(trials: list[dict[str, Any]]) -> dict[str, Any]:
     return {"schema_version": 1, "tasks": serialized_tasks}
 
 
-def _build_artifact_index(jobs_dir: Path, trials: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
-        "jobs_dir": str(jobs_dir.resolve()),
+def _build_artifact_index(jobs_dirs: list[Path], trials: list[dict[str, Any]]) -> dict[str, Any]:
+    index: dict[str, Any] = {
+        "jobs_dir": str(jobs_dirs[-1].resolve()),
         "trials": [
             {
                 "task_name": entry["task_name"],
@@ -436,6 +513,9 @@ def _build_artifact_index(jobs_dir: Path, trials: list[dict[str, Any]]) -> dict[
             for entry in trials
         ],
     }
+    if len(jobs_dirs) > 1:
+        index["jobs_roots"] = [str(root.resolve()) for root in jobs_dirs]
+    return index
 
 
 def _scoring_rewards(trials: list[dict[str, Any]]) -> list[float]:

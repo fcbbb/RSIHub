@@ -100,3 +100,89 @@ def test_gate_identity_uses_the_frozen_per_round_limit(tmp_path: Path) -> None:
     )
 
     assert identity.members == ("task-a", "task-c")
+
+
+def _plan_for(attempts: int = 1, tasks: tuple[str, ...] = ("task-a", "task-b")) -> EvaluationRunPlan:
+    return EvaluationRunPlan(
+        schema_version=1,
+        experiment_id="experiment",
+        generation="3",
+        candidate_commit="a" * 40,
+        purpose="candidate",
+        canonical=True,
+        tasks=tasks,
+        attempts_per_task=attempts,
+        expected_trials=len(tasks) * attempts,
+        concurrency=2,
+        evaluator_fingerprint="b" * 40,
+        task_set_hash="c" * 64,
+        runtime_fingerprint="d" * 64,
+        execution_runtime_fingerprint="e" * 64,
+    )
+
+
+def _write_attempt(
+    workspace: Path,
+    plan: EvaluationRunPlan,
+    *,
+    number: int,
+    status: str | None,
+    results: tuple[tuple[str, dict[str, object]], ...],
+    prior: EvaluationRunPlan | None = None,
+) -> Path:
+    from evolve.runtime import attempt_parent
+
+    attempt = attempt_parent(
+        workspace,
+        purpose=plan.purpose,
+        generation=plan.generation,
+        candidate_commit=plan.candidate_commit,
+    ) / f"attempt-{number}"
+    attempt.mkdir(parents=True)
+    (prior or plan).write(attempt / "run-plan.json")
+    if status is not None:
+        (attempt / "status").write_text(status + "\n")
+    for name, payload in results:
+        trial = attempt / "jobs" / "job" / name
+        trial.mkdir(parents=True)
+        (trial / "result.json").write_text(json.dumps(payload))
+    return attempt
+
+
+def test_resume_reuses_only_incomplete_matching_attempts(tmp_path: Path) -> None:
+    from evolve.evaluation.execution import _resumable_attempt_roots
+
+    plan = _plan_for()
+    first = _write_attempt(
+        tmp_path,
+        plan,
+        number=1,
+        status="infrastructure_failed",
+        results=(("task-a", {"task_name": "task-a", "trial_name": "a"}),),
+    )
+    _write_attempt(
+        tmp_path,
+        plan,
+        number=2,
+        status="complete",
+        results=(("task-a", {"task_name": "task-a", "trial_name": "a", "verifier_result": {"rewards": {"reward": 1}}}),),
+    )
+    _write_attempt(
+        tmp_path,
+        plan,
+        number=3,
+        status=None,
+        results=(("task-a", {"task_name": "task-a", "trial_name": "a"}),),
+        prior=_plan_for(tasks=("task-a",)),
+    )
+
+    assert _resumable_attempt_roots(tmp_path, plan) == ((1, first / "jobs"),)
+
+
+def test_resume_skips_attempts_without_job_evidence(tmp_path: Path) -> None:
+    from evolve.evaluation.execution import _resumable_attempt_roots
+
+    plan = _plan_for()
+    _write_attempt(tmp_path, plan, number=1, status=None, results=())
+
+    assert _resumable_attempt_roots(tmp_path, plan) == ()

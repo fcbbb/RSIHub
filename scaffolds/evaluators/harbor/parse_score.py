@@ -4,9 +4,10 @@ from __future__ import annotations
 import json
 import os
 import sys
+from glob import escape
 from pathlib import Path
 
-from harbor_artifacts import write_harbor_artifacts
+from harbor_artifacts import FINAL_TRIAL_STATUSES, _load_task_trials, write_harbor_artifacts
 
 
 def _load_eval_env(path: Path) -> dict[str, str]:
@@ -70,7 +71,61 @@ def _expected_trials(run_dir: Path, env_values: dict[str, str]) -> int:
     return 1
 
 
+def _resume_roots(primary: Path) -> list[Path]:
+    """Prior-attempt job roots followed by this invocation's jobs directory."""
+    roots = [
+        Path(entry)
+        for entry in os.environ.get("EVOLVE_RESUME_JOBS_ROOTS", "").split(os.pathsep)
+        if entry.strip()
+    ]
+    if primary not in roots:
+        roots.append(primary)
+    return roots
+
+
+def _task_identity(task_name: str, expected: set[str]) -> str:
+    """Map a Harbor-qualified task name back to its frozen dataset identity."""
+    if task_name in expected:
+        return task_name
+    matches = [
+        name for name in expected if task_name.endswith(f"__{name}") or task_name.endswith(f"/{name}")
+    ]
+    return matches[0] if len(matches) == 1 else task_name
+
+
+def _missing_tasks(argv: list[str]) -> int:
+    if len(argv) != 4:
+        raise SystemExit("usage: parse_score.py --missing-tasks <planned_tasks> <output>")
+    planned_path = Path(argv[2])
+    output_path = Path(argv[3])
+    planned = [
+        line.strip()
+        for line in planned_path.read_text().splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    env_values = _load_eval_env(Path("evaluator") / "eval.env")
+    attempts = max(1, int(env_values.get("EVOLVE_HARBOR_ATTEMPTS", "1")))
+    reward_schema = env_values.get("EVOLVE_REWARD_SCHEMA", "scalar")
+    roots = [
+        Path(entry)
+        for entry in os.environ.get("EVOLVE_RESUME_JOBS_ROOTS", "").split(os.pathsep)
+        if entry.strip()
+    ]
+    expected = set(planned)
+    counts: dict[str, int] = {}
+    for trial in _load_task_trials(roots, reward_schema=reward_schema):
+        if trial["status"] not in FINAL_TRIAL_STATUSES:
+            continue
+        identity = _task_identity(str(trial["task_name"]), expected)
+        counts[identity] = counts.get(identity, 0) + 1
+    missing = [task for task in planned if counts.get(task, 0) < attempts]
+    output_path.write_text("".join(f"{escape(task)}\n" for task in missing))
+    return 0
+
+
 def main(argv: list[str]) -> int:
+    if len(argv) > 1 and argv[1] == "--missing-tasks":
+        return _missing_tasks(argv)
     if len(argv) != 4:
         raise SystemExit("usage: parse_score.py <jobs_dir> <run_dir> <harbor_rc>")
     jobs_dir = Path(argv[1])
@@ -79,13 +134,15 @@ def main(argv: list[str]) -> int:
     env_values = _load_eval_env(Path("evaluator") / "eval.env")
     reward_schema = env_values.get("EVOLVE_REWARD_SCHEMA", "scalar")
     expected_trials = _expected_trials(run_dir, env_values)
-    rewards = write_harbor_artifacts(jobs_dir, run_dir, reward_schema=reward_schema)
+    jobs_roots = _resume_roots(jobs_dir)
+    rewards = write_harbor_artifacts(jobs_roots, run_dir, reward_schema=reward_schema)
     if not rewards and reward_schema == "scalar":
-        for reward_path in sorted(jobs_dir.rglob("verifier/reward.txt")) if jobs_dir.exists() else []:
-            try:
-                rewards.append(float(reward_path.read_text().strip()))
-            except (OSError, ValueError):
-                continue
+        for jobs_root in jobs_roots:
+            for reward_path in sorted(jobs_root.rglob("verifier/reward.txt")) if jobs_root.exists() else []:
+                try:
+                    rewards.append(float(reward_path.read_text().strip()))
+                except (OSError, ValueError):
+                    continue
     completed_trials = len(rewards)
     missing_trials = max(expected_trials - completed_trials, 0)
     if completed_trials == 0:

@@ -1,0 +1,104 @@
+experiment:
+  id: ahe_dsh_reviewbench
+  max_generations: 10
+  target_score: null
+  children_per_gen: 1
+  mode: driver
+  seed: 0
+
+target:
+  seed: builtin-dsh-harbor
+
+surface:
+  include: [target/**]
+  exclude:
+    - target/agent.py
+    - target/dsh_trajectory.py
+    - target/runners/**
+
+operators:
+  select:
+    operator: ahe_latest
+    timeout_s: 600
+    config: {}
+  rollout:
+    operator: parent_evaluation
+    timeout_s: 600
+    config: {field_limit: 2000}
+  analyze:
+    operator: ahe
+    timeout_s: 3600
+    config:
+      max_tasks: 30
+      max_concurrent: 10
+      timeout_per_task: 900
+      retry_attempts: 1
+      field_limit: 2000
+      # ReviewBench rewards are continuous F1. The default 1.0 labels every
+      # imperfect review as failed; lower it if the debugger becomes noisy.
+      pass_threshold: 0.5
+      debugger:
+        runner: harbor
+        agent: evolve.integrations.harbor.dsh_container:DshContainerAgent
+        model: openai/deepseek-v4.1-flash-1017
+        environment: docker
+        image: evolve-mutate-dsh:20261104-dsh021rc5
+        agent_kwargs: {role: analyst, version: 0.2.1-rc.5}
+        agent_env: {DSH_CONTEXT_WINDOW: "1000000"}
+  mutate:
+    operator: ahe
+    timeout_s: 3600
+    config:
+      runner: harbor
+      expose_gate_data: false
+      agent: evolve.integrations.harbor.dsh_container:DshContainerAgent
+      model: openai/deepseek-v4.1-flash-1017
+      environment: docker
+      image: evolve-mutate-dsh:20261104-dsh021rc5
+      editable_roots: [target]
+      prompt_path: target/profile.cordis.yml
+      agent_kwargs: {role: mutate, version: 0.2.1-rc.5}
+      agent_env: {DSH_CONTEXT_WINDOW: "1000000"}
+      max_retries: 1
+  validate:
+    operator: node_check
+    timeout_s: 300
+    config: {}
+  gate:
+    operator: ahe_artifact_valid
+    timeout_s: 600
+    config: {}
+  record:
+    operator: jsonl
+    timeout_s: 600
+    config: {}
+  timeout_s: 600
+
+evaluator:
+  engine: harbor
+  model: openai/deepseek-v4.1-flash-1017
+  dataset: reviewbench-test
+  agent: target.agent:DshAgent
+  task_scope: full
+  evaluation_split: train
+  sampling: static
+  tasks_per_round: 219
+  repetitions: 1
+  n_concurrent: 8
+  max_retries: 1
+  benchmark_timeout_is_zero: true
+  partial_floor: 1.0
+  # ReviewBench scoring: augmented F1 per PR, undefined PRs imputed to the
+  # defined mean. The schema validator requires partial_floor 1.0 here.
+  reward_schema: reviewbench
+  # The exported dataset keeps `[agent].network_mode = "allowlist"` but no
+  # allowed hosts: the model endpoint is merged in per run, exactly as
+  # `harbor run --allow-agent-host` does for the upstream harness. The judge
+  # host stays in `[verifier]`, which is a separate environment.
+  agent_allowed_hosts:
+    - token-plan.cn-beijing.maas.aliyuncs.com
+  # task.toml ships agent timeout_sec = 900; give the dsh candidate 1800 s.
+  agent_timeout_multiplier: 2
+  agent_env:
+    DSH_TASK_TIMEOUT_SEC: "1800"
+    DSH_RUNTIME_IMAGE: evolve-mutate-dsh:20261104-dsh021rc5

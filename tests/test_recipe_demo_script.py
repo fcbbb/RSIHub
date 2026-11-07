@@ -45,10 +45,14 @@ def _environment(fake_bin: Path, calls: Path, **values: str) -> dict[str, str]:
     environment = os.environ.copy()
     for name in (
         "DATASET",
+        "DATASET_PATH",
         "ENV_FILE",
         "EVOLVE_ASSET_DIR",
         "GENERATIONS",
+        "MODE",
         "OPENAI_API_KEY",
+        "PRE_INIT_HOOK",
+        "PREPARE_HOOK",
         "RECIPE",
         "SEED",
         "TASKS",
@@ -274,10 +278,53 @@ def test_recipe_demo_rejects_non_main_recipes_before_sync(tmp_path: Path) -> Non
     assert _calls(calls_path) == []
 
 
+def test_recipe_demo_runs_hooks_and_can_evaluate_gen_zero(tmp_path: Path) -> None:
+    fake_bin, calls_path = _fake_uv(tmp_path)
+    dataset = tmp_path / "reviewbench"
+    dataset.mkdir()
+    (dataset / "dataset.toml").write_text('schema_version = "1.0"\n')
+    workspace = tmp_path / "workspace"
+    marker = tmp_path / "hook-order"
+    pre_init = f"printf 'pre-init\\n' >> {marker}"
+    prepare = f"printf 'prepare\\n' >> {marker}; printf 'RB_HARBOR_OPENAI_API_KEY=from-hook\\n'"
+
+    subprocess.run(
+        ["bash", str(SCRIPT), "ahe_dsh_reviewbench"],
+        check=True,
+        cwd=tmp_path,
+        env=_environment(
+            fake_bin,
+            calls_path,
+            DATASET_PATH=str(dataset),
+            MODE="eval",
+            PRE_INIT_HOOK=pre_init,
+            PREPARE_HOOK=prepare,
+            WORKSPACE=str(workspace),
+        ),
+    )
+
+    calls = _calls(calls_path)
+    assert calls[0] == ["sync", "--frozen"]
+    assert calls[1] == ["run", "--frozen", "sh", "-c", pre_init]
+    assert calls[2][2:4] == ["evolve", "init"]
+    assert calls[3] == ["run", "--frozen", "sh", "-c", prepare]
+    assert calls[4] == ["run", "--frozen", f"{workspace}/evolve", "preflight", str(workspace)]
+    assert calls[5] == [
+        "run",
+        "--frozen",
+        f"{workspace}/evolve",
+        "eval",
+        str(workspace),
+        "0",
+        "--force",
+    ]
+    assert marker.read_text().splitlines() == ["pre-init", "prepare"]
+
+
 def test_recipe_demo_remains_short_portable_bash() -> None:
     result = subprocess.run(["bash", "-n", str(SCRIPT)], check=False, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     text = SCRIPT.read_text()
     for private in ("DevBox", "/data00", "proxy.env", "REPO_BUNDLE", "python -"):
         assert private not in text
-    assert len(text.splitlines()) <= 35
+    assert len(text.splitlines()) <= 60

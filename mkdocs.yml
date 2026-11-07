@@ -48,6 +48,7 @@ nav:
       - Mutate operator execution: guides/mutate-operators.md
       - Experiment viewer: guides/experiment-viewer.md
       - Local Harbor environment: guides/local-environment.md
+      - ReviewBench evaluation: guides/reviewbench.md
   - Reference:
       - Environment Variables: reference/environment-variables.md
       - Operator overview: reference/operators.md

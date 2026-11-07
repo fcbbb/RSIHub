@@ -110,17 +110,101 @@ def _agent_env_entries(checkout: Path) -> list[str]:
     return [line.strip() for line in path.read_text().splitlines() if line.strip()]
 
 
+_REVIEWBENCH_COUNT_FIELDS = (
+    "candidate_count",
+    "golden_tp_count",
+    "matched_count",
+    "matched_tp_count",
+    "unmatched_count",
+    "unmatched_tp_count",
+    "unmatched_fp_count",
+    "golden_covered_count",
+)
+
+
+def _reviewbench_counts(rewards: Mapping[str, Any]) -> dict[str, int] | None:
+    """Return validated ``overall.*`` counts from a ReviewBench reward envelope.
+
+    ReviewBench verifiers report counts rather than a scalar, so replayed
+    evidence must rebuild the reward exactly as the evaluator does. The
+    validation mirrors ``scaffolds/evaluators/harbor/harbor_artifacts.py``.
+    """
+    if rewards.get("rb_schema") != 1:
+        return None
+    counts: dict[str, int] = {}
+    for field in _REVIEWBENCH_COUNT_FIELDS:
+        value = rewards.get(f"overall.{field}")
+        if type(value) not in (int, float) or not 0 <= value <= 2**53 - 1 or value != int(value):
+            return None
+        counts[field] = int(value)
+    if (
+        counts["candidate_count"] != counts["matched_count"] + counts["unmatched_count"]
+        or counts["unmatched_count"] != counts["unmatched_tp_count"] + counts["unmatched_fp_count"]
+        or counts["matched_tp_count"] > counts["matched_count"]
+        or counts["golden_covered_count"] > counts["golden_tp_count"]
+    ):
+        return None
+    return counts
+
+
+def _reviewbench_f1(counts: Mapping[str, int]) -> float | None:
+    """Augmented F1 as the ReviewBench evaluator computes it; None is undefined."""
+    precision_denominator = counts["candidate_count"]
+    recall_denominator = counts["golden_tp_count"] + counts["unmatched_tp_count"]
+    precision = (
+        (counts["matched_tp_count"] + counts["unmatched_tp_count"]) / precision_denominator
+        if precision_denominator
+        else None
+    )
+    recall = (
+        (counts["golden_covered_count"] + counts["unmatched_tp_count"]) / recall_denominator
+        if recall_denominator
+        else None
+    )
+    if precision is None or recall is None:
+        return None
+    return 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+
+
 def _reward(payload: dict[str, Any], trial_dir: Path) -> float | None:
     verifier = payload.get("verifier_result")
     rewards = verifier.get("rewards") if isinstance(verifier, dict) else None
-    reward = rewards.get("reward") if isinstance(rewards, dict) else None
-    if isinstance(reward, (int, float)) and not isinstance(reward, bool):
-        return float(reward)
+    if isinstance(rewards, Mapping):
+        reward = rewards.get("reward")
+        if isinstance(reward, (int, float)) and not isinstance(reward, bool):
+            return float(reward)
+        counts = _reviewbench_counts(rewards)
+        if counts is not None:
+            return _reviewbench_f1(counts)
     reward_path = trial_dir / "verifier" / "reward.txt"
     try:
         return float(reward_path.read_text().strip()) if reward_path.exists() else None
     except (OSError, ValueError):
         return None
+
+
+def _impute_reviewbench_rewards(cases: list[dict[str, Any]], pass_threshold: float) -> None:
+    """Give undefined PRs the mean of defined PRs, as the evaluator does.
+
+    A PR with no candidates and no golden findings has an undefined F1. The
+    evaluator replaces it with the mean of the defined PRs before scoring, so
+    replay has to apply the same rule or its rewards drift from the certified
+    evaluation.
+    """
+    reviewbench = [
+        case
+        for case in cases
+        if isinstance(case.get("verifier_rewards"), dict) and _reviewbench_counts(case["verifier_rewards"]) is not None
+    ]
+    defined = [float(case["reward"]) for case in reviewbench if case.get("reward") is not None]
+    if not defined:
+        return
+    mean = sum(defined) / len(defined)
+    for case in reviewbench:
+        if case.get("reward") is None and not (case.get("exception") or {}).get("type"):
+            case["reward"] = mean
+            case["reward_imputed"] = True
+            case["outcome"] = _outcome(mean, "", pass_threshold)
 
 
 def _outcome(reward: float | None, exception_type: str, pass_threshold: float) -> str:
@@ -613,6 +697,7 @@ def collect_cases(
                 "result_path": str(result_path),
             }
         )
+    _impute_reviewbench_rewards(cases, pass_threshold)
     return cases
 
 

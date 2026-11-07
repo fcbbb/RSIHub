@@ -1,0 +1,19 @@
+{
+  "backend": "docker",
+  "runtime": {
+    "prepare": "evaluator/prepare-runtime.sh",
+    "required_environment": {
+      "DSH_RUNTIME_IMAGE": "nonempty",
+      "DSH_DOCKER_BIN": "executable"
+    },
+    "timeout_s": 120
+  },
+  "schema_version": 1,
+  "smoke": {
+    "command": [
+      "sh",
+      "evaluator/doctor_runtime_probe.sh"
+    ],
+    "timeout_s": 120
+  }
+}

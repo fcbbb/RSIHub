@@ -87,7 +87,12 @@ evaluator:
   n_concurrent: 4
   max_retries: 1
   benchmark_timeout_is_zero: true
-  partial_floor: 1.0
+  # Tolerate sparse infrastructure failures instead of voiding the whole
+  # round. Missing trials are scored as zero because classify_evaluation
+  # divides by tasks_per_round, so partial coverage can only understate a
+  # candidate. ReviewBench's macro-F1 identity is the exception and still
+  # requires 1.0 (enforced in evolve.workspace).
+  partial_floor: 0.8
   # Deep-swe's verifier environment is `no-network` and needs no LLM judge;
   # only the agent phase needs the model host, which task.toml blocks.
   agent_allowed_hosts:

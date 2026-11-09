@@ -1,6 +1,6 @@
 experiment:
   id: ahe_dsh_sweatlas
-  max_generations: 10
+  max_generations: 5
   target_score: null
   children_per_gen: 1
   mode: driver
@@ -79,17 +79,25 @@ evaluator:
   model: openai/deepseek-v4.1-flash-1017
   dataset: /home/fcbbb/RSI/benchmark/SWE-Atlas/data/tw
   agent: target.agent:DshAgent
-  task_scope: full
   evaluation_split: train
+  split: {train: 0.7, gate: 0.0, sealed: 0.3, seed: 0}
   sampling: static
-  tasks_per_round: 90
+  tasks_per_round: 63
   repetitions: 1
-  n_concurrent: 4
+  n_concurrent: 8
+  # The held-out 30% is evaluated once for gen/0 and once for the best
+  # train-split candidate after the last generation.
+  anchor: {final: true, every_rounds: 0}
   max_retries: 1
   benchmark_timeout_is_zero: true
-  # A round is scored only over the full task set; an interrupted round is
-  # resumed instead of accepting partial coverage as a result.
-  partial_floor: 1.0
+  # Tolerate sparse infrastructure failures (for example a task verifier
+  # exceeding its own 600 s cap) instead of voiding the whole round. Missing
+  # trials are scored as zero because classify_evaluation divides by
+  # tasks_per_round, so partial coverage can only understate a candidate.
+  # ReviewBench is the exception: its macro-F1 identity needs every trial, so
+  # reward_schema=reviewbench still requires partial_floor: 1.0 (enforced in
+  # evolve.workspace).
+  partial_floor: 0.8
   # The verifier runs mutation testing plus one LLM call per rubric and one
   # manifest check; task.toml budgets 900 s, which is tight for 13 calls.
   verifier_timeout_multiplier: 3

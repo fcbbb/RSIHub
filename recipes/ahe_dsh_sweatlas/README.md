@@ -7,9 +7,10 @@ containers as `ahe_dsh`; only the evaluator contract differs.
 | Setting | Value | Why |
 | --- | --- | --- |
 | `evaluator.dataset` | `/home/fcbbb/RSI/benchmark/SWE-Atlas/data/tw` | 90 Harbor task directories, overridden by `--dataset`/`DATASET_PATH` |
-| `evaluator.tasks_per_round` | `90` | a round scores the whole dataset |
+| `evaluator.split` | `train 0.7 / gate 0.0 / sealed 0.3` | rounds evolve on 63 tasks; the 27 sealed tasks are evaluated only for `gen/0` and for the final best candidate (`anchor.final: true`) |
+| `evaluator.tasks_per_round` | `63` | a round scores the whole train split |
 | `evaluator.reward_schema` | `scalar` (default) | each task returns 1 only if every rubric, manifest, and mutation check passes |
-| `evaluator.partial_floor` | `1.0` | an interrupted round is resumed, never scored on partial coverage |
+| `evaluator.partial_floor` | `0.8` | sparse infrastructure failures are scored as zero for that task; up to 20% missing evidence is tolerated |
 | `evaluator.verifier_timeout_multiplier` | `3` | task.toml budgets 900 s; the verifier runs mutation testing plus one LLM call per rubric |
 | `evaluator.agent_allowed_hosts` | the model host | merged into the agent-phase allowlist at run time |
 | `analyze.config.pass_threshold` | `1.0` | rewards are binary |
@@ -58,7 +59,8 @@ uv run --frozen ./runs/ahe_dsh_sweatlas/evolve eval ./runs/ahe_dsh_sweatlas 0 --
 ```
 
 Use `--tasks N` on `evolve init` for a smoke workspace; the frozen split then
-contains only those N tasks, which keeps `partial_floor: 1.0` satisfiable.
+contains only those N tasks, so `partial_floor: 0.8` tolerates at most `N/5`
+missing trials before the round is treated as infrastructure-failed.
 
 The dsh runtime only starts on Node **>= 22.19** (`lib/bin.js` dispatches on
 `import.meta.main`; older releases exit 0 without reading the JSON-RPC

@@ -8,7 +8,7 @@ dataset. The candidate, debugger, and mutator are the same dsh containers as
 | --- | --- | --- |
 | `evaluator.dataset` | `/home/fcbbb/RSI/benchmark/deep-swe/tasks` | 113 Harbor task directories, overridden by `--dataset`/`DATASET_PATH` |
 | `evaluator.tasks_per_round` | `113` | a round scores the whole dataset |
-| `evaluator.partial_floor` | `1.0` | an interrupted round is resumed, never scored on partial coverage |
+| `evaluator.partial_floor` | `0.8` | sparse infrastructure failures are scored as zero for that task; up to 20% missing evidence is tolerated |
 | `evaluator.n_concurrent` | `4` | every trial runs an agent container plus a separate verifier container |
 | `evaluator.agent_allowed_hosts` | the model host | merged into the agent-phase allowlist at run time |
 | `analyze.config.pass_threshold` | `1.0` | rewards are binary: `f2p` and `p2p` must both hold |
@@ -55,8 +55,8 @@ uv run --frozen ./runs/ahe_dsh_deepswe/evolve eval ./runs/ahe_dsh_deepswe 0 --fo
 
 Task images are pinned `public.ecr.aws` images; the first evaluation pulls
 them. Use `--tasks N` on `evolve init` for a smoke workspace; the frozen split
-then contains only those N tasks, which keeps `partial_floor: 1.0`
-satisfiable.
+then contains only those N tasks, so `partial_floor: 0.8` tolerates at most
+`N/5` missing trials before the round is treated as infrastructure-failed.
 
 The dsh runtime only starts on Node **>= 22.19** (`lib/bin.js` dispatches on
 `import.meta.main`; older releases exit 0 without reading the JSON-RPC

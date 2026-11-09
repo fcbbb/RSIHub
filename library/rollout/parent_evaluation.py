@@ -157,18 +157,51 @@ def _artifact_index(artifact: _ArtifactSnapshot) -> dict[str, Any]:
     return cast(dict[str, Any], payload)
 
 
-def _indexed_path(jobs_dir: Path, relative: object) -> tuple[str, Path]:
+def _jobs_roots(artifact: _ArtifactSnapshot, index: dict[str, Any]) -> list[Path]:
+    """Return every jobs directory that can hold this attempt's certified files.
+
+    A resumed evaluation keeps trials from earlier attempts, so one artifact
+    index can reference files under more than one jobs directory.  The index
+    records them in ``jobs_roots``; the attempt's own jobs directory stays first
+    so single-attempt artifacts keep their previous resolution order.
+    """
+    base = artifact.path.parent / "jobs"
+    recorded = index.get("jobs_roots")
+    if recorded is None:
+        recorded = []
+    elif not isinstance(recorded, list):
+        raise SystemExit("evaluation artifact jobs roots are malformed")
+    roots: list[Path] = []
+    for candidate in [base, *recorded]:
+        if isinstance(candidate, Path):
+            root = candidate
+        elif isinstance(candidate, str) and candidate:
+            root = Path(candidate)
+            if not root.is_absolute():
+                root = artifact.path.parent / root
+        else:
+            raise SystemExit("evaluation artifact jobs root is malformed")
+        resolved = root.resolve()
+        if resolved not in roots:
+            roots.append(resolved)
+    return roots
+
+
+def _indexed_path(roots: list[Path], relative: object) -> tuple[str, Path]:
     if not isinstance(relative, str) or not relative:
         raise SystemExit("evaluation artifact file has malformed path")
     pure = PurePosixPath(relative)
     if pure.is_absolute() or any(part in {"", ".", ".."} for part in pure.parts):
         raise SystemExit(f"evaluation artifact file path escapes jobs: {relative}")
-    target = jobs_dir.joinpath(*pure.parts)
-    try:
-        target.resolve().relative_to(jobs_dir.resolve())
-    except ValueError as error:
-        raise SystemExit(f"evaluation artifact file path escapes jobs: {relative}") from error
-    return pure.as_posix(), target
+    for root in roots:
+        target = root.joinpath(*pure.parts)
+        try:
+            target.resolve().relative_to(root)
+        except ValueError as error:
+            raise SystemExit(f"evaluation artifact file path escapes jobs: {relative}") from error
+        if target.is_file():
+            return pure.as_posix(), target
+    return pure.as_posix(), roots[0].joinpath(*pure.parts)
 
 
 def _verified_indexed_files(artifact: _ArtifactSnapshot) -> tuple[Path, dict[str, bytes]]:
@@ -177,6 +210,7 @@ def _verified_indexed_files(artifact: _ArtifactSnapshot) -> tuple[Path, dict[str
     jobs_dir = artifact.path.parent / "jobs"
     if not jobs_dir.is_dir():
         raise SystemExit(f"evaluation jobs directory is missing: {jobs_dir}")
+    roots = _jobs_roots(artifact, index)
 
     certified: dict[str, bytes] = {}
     for trial in index["trials"]:
@@ -186,7 +220,7 @@ def _verified_indexed_files(artifact: _ArtifactSnapshot) -> tuple[Path, dict[str
         for entry in trial["files"]:
             if not isinstance(entry, dict):
                 raise SystemExit("evaluation artifact file entry is malformed")
-            relative, path = _indexed_path(jobs_dir, entry.get("path"))
+            relative, path = _indexed_path(roots, entry.get("path"))
             expected_bytes = entry.get("bytes")
             expected_sha256 = entry.get("sha256")
             if (

@@ -71,17 +71,17 @@ def test_ahe_recipe_initializes_harbor_miniswe_composition(tmp_path: Path) -> No
     assert "agent_env" not in operators["mutate"]["config"]
     assert {name: operator_timeout(operators, name) for name in ("rollout", "analyze", "mutate")} == {
         "rollout": 600,
-        "analyze": 3600,
+        "analyze": 8000,
         "mutate": 3600,
     }
     assert operators["analyze"] == {
         "operator": "ahe",
-        "timeout_s": 3600,
+        "timeout_s": 8000,
         "config": {
             "max_tasks": 30,
             "max_concurrent": 10,
             "timeout_per_task": 600.0,
-            "retry_attempts": 1,
+            "debugger_max_retries": 2,
             "debugger_agent_kwargs": {"reasoning_effort": "high", "max_tokens": 64000},
             "field_limit": 2000,
             "pass_threshold": 1.0,

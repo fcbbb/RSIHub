@@ -34,7 +34,6 @@ CONFIG = Config(
         "max_tasks": integer(default=90, minimum=1),
         "max_concurrent": integer(default=16, minimum=1),
         "timeout_per_task": number(),
-        "retry_attempts": integer(default=1, minimum=1),
         "debugger": object_field(additional_properties=True),
         "debugger_max_retries": integer(minimum=0),
         "debugger_agent_kwargs": object_field(additional_properties=True),

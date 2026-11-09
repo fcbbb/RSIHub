@@ -110,6 +110,38 @@ def _artifact(
     }
 
 
+def test_replay_uses_recorded_jobs_root_when_attempt_jobs_dir_is_absent(tmp_path: Path, monkeypatch) -> None:
+    module = _replay_module()
+    workspace = tmp_path / "workspace"
+    jobs, _reference = _artifact(workspace)
+    attempt = jobs.parent
+    resume = attempt / "jobs-resume-1"
+    jobs.rename(resume)
+    artifact = attempt / "evaluation_artifacts.json"
+    document = json.loads(artifact.read_text())
+    document["jobs_roots"] = [str(resume)]
+    artifact.write_text(json.dumps(document))
+    reference = {
+        "path": artifact.relative_to(workspace).as_posix(),
+        "sha256": hashlib.sha256(artifact.read_bytes()).hexdigest(),
+    }
+    rows = {"3": {"genid": "3", "artifacts": reference, "score": 1.0}}
+    observed: dict[str, object] = {}
+
+    def collect(selected_jobs: Path, **options):
+        result = next(selected_jobs.rglob("evolve-replay.json"))
+        observed["task_name"] = json.loads(result.read_text())["task_name"]
+        return [{"task_name": "task-a", "trial_name": "task-a__trial-0", "reward": 1.0, "outcome": "passed"}]
+
+    monkeypatch.setattr(module, "ArchiveView", lambda _workspace: _Archive(rows))
+    monkeypatch.setattr(module, "_load_collect_cases", lambda _checkout: collect)
+    ctx = _context(workspace, parent="3")
+
+    module.EvaluationReplayRollout().rollout(ctx.checkout, ctx)
+
+    assert observed == {"task_name": "task-a"}
+
+
 def test_replay_uses_selected_parent_certified_evaluation(tmp_path: Path, monkeypatch) -> None:
     module = _replay_module()
     workspace = tmp_path / "workspace"

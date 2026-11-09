@@ -168,7 +168,7 @@ def test_ahe_prompt_uses_official_decisions_and_required_manifest(tmp_path: Path
     assert "No selected-parent mutate change exists for this baseline generation." in prompt
     assert str(ctx.run_dir) not in prompt
     assert "Repository: /app/task/workspace" in prompt
-    assert "Archive: /app/task/workspace/archive.jsonl" in prompt
+    assert "Feedback bundle: /app/task/workspace/runs/gen-1/feedback" in prompt
     assert "Raw trace evidence: /app/task/workspace/runs/gen-1/analyze/evidence" in prompt
     assert "selected parent's handoff" in prompt
 
@@ -268,8 +268,8 @@ def test_ahe_prompt_points_to_prior_change_without_inlining_it(tmp_path: Path) -
 
     prompt = module.build_prompt(checkout, "fallback", ctx)
 
-    assert "Selected parent mutate artifacts" in prompt
-    assert "/app/task/workspace/runs/gen-1/mutate" in prompt
+    assert "/app/task/workspace/runs/gen-2/feedback/last_accepted.diff" in prompt
+    assert "/app/task/workspace/runs/gen-2/feedback/evidence/history.json" in prompt
     assert "PREVIOUS REASONING BODY" not in prompt
     assert "target/previous.py" not in prompt
     assert "PREVIOUS PATCH BODY" not in prompt

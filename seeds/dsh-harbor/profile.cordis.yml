@@ -46,3 +46,24 @@
 - insert:
     - id: plugin-seed-probe
       name: './plugins/seed-probe.mjs'
+
+# Optional runtime capabilities. Every package named here is already installed
+# in the evaluation runtime; never add npm dependencies. The candidate runtime
+# is staged at /tmp/evolve-candidate, so plugins should resolve sibling paths
+# from import.meta.url.
+#
+# sdk-minimal does not load skill bundles by default. To enable skills/**,
+# add the installed skill rows:
+#
+# - insert:
+#     - id: skill
+#       name: '@deepseek-ai/dsh-skill'
+#     - id: skill-filesystem
+#       name: '@deepseek-ai/dsh-skill-filesystem'
+#       config:
+#         customSkillDirs: ['/tmp/evolve-candidate/skills']
+#     - id: tool-skill
+#       name: '@deepseek-ai/dsh-tool-skill'
+#
+# The same insert mechanism adds any other installed @deepseek-ai/dsh-* row
+# (additional tools, model providers, or MCP resources).

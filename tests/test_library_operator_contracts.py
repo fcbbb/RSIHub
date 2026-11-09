@@ -187,7 +187,6 @@ def test_every_recipe_selected_config_is_accepted(recipe_path: Path) -> None:
             {
                 "max_tasks": 90,
                 "max_concurrent": 16,
-                "retry_attempts": 1,
                 "field_limit": 2000,
                 "pass_threshold": 1.0,
                 "debugger": {"timeout_s": 17, "provider_option": {"opaque": True}},

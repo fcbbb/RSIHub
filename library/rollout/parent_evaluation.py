@@ -207,10 +207,10 @@ def _indexed_path(roots: list[Path], relative: object) -> tuple[str, Path]:
 def _verified_indexed_files(artifact: _ArtifactSnapshot) -> tuple[Path, dict[str, bytes]]:
     """Verify the file index and return one immutable read of every certified file."""
     index = _artifact_index(artifact)
-    jobs_dir = artifact.path.parent / "jobs"
-    if not jobs_dir.is_dir():
-        raise SystemExit(f"evaluation jobs directory is missing: {jobs_dir}")
     roots = _jobs_roots(artifact, index)
+    existing_roots = [root for root in roots if root.is_dir()]
+    if not existing_roots:
+        raise SystemExit(f"evaluation jobs directory is missing: {roots[0]}")
 
     certified: dict[str, bytes] = {}
     for trial in index["trials"]:
@@ -248,8 +248,9 @@ def _verified_indexed_files(artifact: _ArtifactSnapshot) -> tuple[Path, dict[str
 
     indexed_results = {relative for relative in certified if PurePosixPath(relative).name == "evolve-replay.json"}
     actual_results = {
-        path.relative_to(jobs_dir).as_posix()
-        for path in jobs_dir.rglob("evolve-replay.json")
+        path.relative_to(root).as_posix()
+        for root in existing_roots
+        for path in root.rglob("evolve-replay.json")
         if path.is_file() and _is_replay_result(path)
     }
     extra_results = sorted(actual_results - indexed_results)
@@ -262,11 +263,11 @@ def _verified_indexed_files(artifact: _ArtifactSnapshot) -> tuple[Path, dict[str
             relative = (trial_root / suffix).as_posix()
             if relative in certified:
                 continue
-            if jobs_dir.joinpath(*PurePosixPath(relative).parts).is_file():
+            if any(root.joinpath(*PurePosixPath(relative).parts).is_file() for root in existing_roots):
                 extra_artifacts.append(relative)
     if extra_artifacts:
         raise SystemExit(f"evaluation artifact contains unindexed replay file: {sorted(extra_artifacts)[0]}")
-    return jobs_dir, certified
+    return roots[0], certified
 
 
 def _is_replay_result(path: Path) -> bool:

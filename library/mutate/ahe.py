@@ -111,17 +111,43 @@ For this generation:
 8. Write one official-style change manifest to the required control file.
 
 `target/profile.cordis.yml` is a patch over the fixed `sdk-minimal` dsh bundle.
-The evolvable surface is the candidate profile, `target/plugins/`,
-`target/skills/`, `target/PLAYBOOK.md`, and `target/EVOLUTION_LOG.md`. Never
-edit `target/agent.py`, `target/dsh_trajectory.py`, or `target/runners/**`:
-those are frozen Harbor/rollout seams. Keep the profile valid YAML and keep
-plugin imports resolvable. The sdk-minimal runtime is fixed: reference only
-packages it already installs and never add npm dependencies or import removed
-demo-spine packages. If you edit runtime instructions or plugin output, include
-only guidance usable by the benchmark-solving agent; do not copy this evolution
-workflow, evidence paths, KEEP/REVISE/ROLLBACK decisions, or manifest
-requirements into target files, and do not refer to debuggers or other
-evolution-only context there.
+The evolvable surface is the candidate profile, `target/plugins/`, and
+`target/skills/`. The sdk-minimal bundle is fixed and already installed; you
+may add or change profile rows and local plugins that use any package the
+runtime installs.
+
+Addable capabilities (do not add npm dependencies or import removed demo-spine
+packages):
+- Profile rows for any installed `@deepseek-ai/dsh-*` package, including the
+  fixed runtime's `dsh-tool-*`, model providers, and MCP resources.
+- Local ESM plugins under `target/plugins/`, referenced from the profile as
+  `./plugins/*.mjs`; the rollout driver rewrites those names to absolute
+  paths. A plugin can register tools, providers, or lifecycle hooks through
+  the `ctx` it receives (see `target/plugins/seed-probe.mjs`).
+- Skill bundles under `target/skills/`. The sdk-minimal bundle does not load
+  skills by default. To enable them, insert the installed skill rows into the
+  profile:
+      - insert:
+          - id: skill
+            name: '@deepseek-ai/dsh-skill'
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+            config: {customSkillDirs: ['/tmp/evolve-candidate/skills']}
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+  Rows that do not exist yet must go under `insert`; a bare `- id: ...` entry
+  patches an existing row and dsh skips it with "entry not found". Alternatively
+  add a plugin that registers a skill provider. The candidate runtime is
+  staged at `/tmp/evolve-candidate`; a local plugin should resolve sibling
+  paths from `import.meta.url` rather than assuming the process cwd.
+
+Never edit `target/agent.py`, `target/dsh_trajectory.py`, or
+`target/runners/**`: those are frozen Harbor/rollout seams. Keep the profile
+valid YAML and keep plugin imports resolvable. If you edit runtime
+instructions or plugin output, include only guidance usable by the
+benchmark-solving agent; do not copy this evolution workflow, evidence paths,
+KEEP/REVISE/ROLLBACK decisions, or manifest requirements into target files, and
+do not refer to debuggers or other evolution-only context there.
 
 Current debugger reports evaluate the selected parent. The new edit will be
 evaluated by the next loop. Do not edit the evaluator, mechanism, archive,
@@ -159,57 +185,6 @@ def _safe_usage(usage: object) -> dict[str, Any]:
     usd = normalized.get("usd", 0)
     normalized["usd"] = usd if isinstance(usd, (int, float)) and not isinstance(usd, bool) else 0
     return normalized
-
-
-def _required_text(path: Path, label: str) -> str:
-    try:
-        text = path.read_text().strip()
-    except OSError as exc:
-        raise RuntimeError(f"missing {label}: {path}") from exc
-    if not text:
-        raise RuntimeError(f"empty {label}: {path}")
-    return text
-
-
-def _prior_change_context(ctx: OperatorContext) -> str:
-    if ctx.parent in (None, "0"):
-        return "No prior change context (baseline generation)."
-    root = ctx.workspace / "runs" / f"gen-{ctx.parent}" / "mutate"
-    sections = []
-    for name in ("change_manifest.json", "output.txt", "changed.json", "patch.diff"):
-        path = root / name
-        try:
-            content = path.read_text().strip()
-        except OSError:
-            continue
-        if content:
-            sections.append(f"## {name}\n\n{content[:20000]}")
-    return "\n\n".join(sections) or "No prior change artifacts were preserved."
-
-
-def _overview(ctx: OperatorContext) -> str:
-    return _required_text(
-        ctx.run_dir / "analyze" / "analysis" / "overview.md",
-        "AHE debugger overview",
-    )
-
-
-def _evidence_paths(ctx: OperatorContext) -> str:
-    root = f"runs/gen-{ctx.genid}"
-    return "\n".join(
-        [
-            f"- Per-task details: `{root}/analyze/analysis/detail/`",
-            f"- Bounded cases: `{root}/analyze/evidence/cases.jsonl`",
-            f"- Raw rollout artifacts: `{root}/rollout/`",
-        ]
-    )
-
-
-def _recent_archive(ctx: OperatorContext) -> str:
-    path = ctx.workspace / "archive.jsonl"
-    if not path.is_file():
-        return "(archive not created yet)"
-    return "\n".join(path.read_text().splitlines()[-20:])
 
 
 def _extract_manifest(output: str, genid: str) -> dict[str, Any]:
@@ -260,9 +235,11 @@ def build_prompt(checkout: Path, observation: str, ctx: OperatorContext) -> str:
     if ctx.parent in (None, "0"):
         prior_change = "No selected-parent mutate change exists for this baseline generation."
     else:
-        parent_mutate = experiment / "runs" / f"gen-{ctx.parent}" / "mutate"
+        feedback = current_run / "feedback"
         prior_change = (
-            f"Inspect the selected parent manifest and patch. Selected parent mutate artifacts: `{parent_mutate}`"
+            f"Read the previous change context: `{feedback / 'last_accepted.diff'}` holds the "
+            f"most recent accepted patch, and `{feedback / 'evidence' / 'history.json'}` holds "
+            "lineage, scores, and verdicts."
         )
     if (checkout / "target" / "codex.toml").is_file():
         target_prompt = CODEX_AHE_PROMPT
@@ -291,7 +268,7 @@ def build_prompt(checkout: Path, observation: str, ctx: OperatorContext) -> str:
         "6. Edit the candidate and write the required AHE change manifest.\n\n"
         "# Evidence Locations\n\n"
         f"Repository: {repository}\n"
-        f"Archive: {experiment / 'archive.jsonl'}\n"
+        f"Feedback bundle: {current_run / 'feedback'}\n"
         f"Current generation artifacts: {current_run}\n"
         f"Raw trace evidence: {current_run / 'analyze' / 'evidence'}\n\n"
         f"{render_artifact_guidance(ctx, experiment)}\n\n"

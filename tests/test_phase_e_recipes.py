@@ -248,7 +248,9 @@ def test_supported_recipes_use_harbor_and_method_mutate() -> None:
         resolved = resolve_builtin_recipe(name)
         config = resolved.config
         assert config["evaluator"]["engine"] == "harbor"
-        assert "target/**" in config["surface"]["include"]
+        assert (
+            "target/**" in config["surface"]["include"] or "target/profile.cordis.yml" in config["surface"]["include"]
+        )
         assert {stage: binding.name for stage, binding in resolved.operators.items()} == expected_operators[name]
         mutate = resolved.operators["mutate"].config
         assert "evolve_tools" not in mutate

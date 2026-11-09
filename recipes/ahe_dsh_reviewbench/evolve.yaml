@@ -10,7 +10,10 @@ target:
   seed: builtin-dsh-harbor
 
 surface:
-  include: [target/**]
+  include:
+    - target/profile.cordis.yml
+    - target/plugins/**
+    - target/skills/**
   exclude:
     - target/agent.py
     - target/dsh_trajectory.py
@@ -27,12 +30,14 @@ operators:
     config: {field_limit: 2000}
   analyze:
     operator: ahe
-    timeout_s: 3600
+    # 30 tasks / 10 workers, one serial task, up to 3 debugger attempts at
+    # 900 s each: ~10,800 s worst case. Keep the stage above that.
+    timeout_s: 12000
     config:
       max_tasks: 30
       max_concurrent: 10
       timeout_per_task: 900
-      retry_attempts: 1
+      debugger_max_retries: 2
       field_limit: 2000
       # ReviewBench rewards are continuous F1. The default 1.0 labels every
       # imperfect review as failed; lower it if the debugger becomes noisy.

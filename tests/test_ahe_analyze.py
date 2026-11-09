@@ -371,7 +371,6 @@ def test_ahe_debugger_zero_retries_means_one_total_attempt(
     module = _module()
     ctx = _ctx(tmp_path)
     ctx.config["debugger_max_retries"] = 0
-    ctx.config.pop("retry_attempts", None)
     job = module._build_jobs([_case("task-a", "failed", 0)], 90)[0]
     calls = 0
 

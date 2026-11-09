@@ -21,10 +21,17 @@ Evolvable (the genome):
   `./plugins/*.mjs` mounts. Do not reference removed demo spine packages.
 - `plugins/**` holds candidate-authored dsh plugins (`*.mjs`); `seed-probe.mjs`
   is a no-op wiring proof.
-- `skills/**` holds skill packages for future evolution notes; gen-0 does not
-  load skill plugins (they are not part of sdk-minimal).
-- `PLAYBOOK.md` / `EVOLUTION_LOG.md` carry lineage methodology and per-generation
-  design notes for the mutation agent.
+- `skills/**` holds skill packages. sdk-minimal does not load them by default.
+  A candidate enables them by adding the installed skill rows to the profile
+  (`@deepseek-ai/dsh-skill`, `@deepseek-ai/dsh-skill-filesystem` with
+  `customSkillDirs: ['/tmp/evolve-candidate/skills']`, and
+  `@deepseek-ai/dsh-tool-skill`) or by adding a provider plugin.
+
+The candidate may add any package the runtime already installs: profile rows
+for `@deepseek-ai/dsh-*` tools, model providers, or MCP resources, and local
+ESM plugins that register tools, providers, or lifecycle hooks through `ctx`.
+Never add npm dependencies. The runtime is staged at `/tmp/evolve-candidate`;
+plugins should resolve sibling paths from `import.meta.url`.
 
 Harness-side (in `surface.exclude`, candidates cannot edit):
 
@@ -62,8 +69,9 @@ Each trial:
    stays resolvable, but desktop/web UI, the inspector, and the optional
    Office/speech engines are gone. Node is reused from the task image when it
    is >= 22; otherwise `install()` extracts the image's Node as well.
-2. `run()` uploads the candidate tree, the materialized overlay, the frozen
-   rollout patch, the in-container runner, and the instruction.
+2. `run()` uploads the candidate runtime surface (`profile.cordis.yml`,
+   `plugins/`, `skills/`), the materialized overlay, the frozen rollout patch,
+   the in-container runner, and the instruction.
 3. The runner starts `dsh --profile sdk-minimal --patch <candidate> --patch
    <harbor>` in the task container. Its local `terminal-bash` executes commands
    in that same container.

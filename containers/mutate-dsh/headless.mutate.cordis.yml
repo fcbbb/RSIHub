@@ -8,7 +8,7 @@
 #
 # Environment injected by DshContainerAgent:
 #   DSH_MODEL / DSH_CONTEXT_WINDOW / DEEPSEEK_API_KEY / DEEPSEEK_BASE_URL
-#   DSH_PERMISSION_MODE=workspace-write
+#   DSH_PERMISSION_MODE=danger-full-access
 
 - id: system-prompt
   config:
@@ -19,18 +19,16 @@
       `target/plugins/` holds candidate plugin source files and `target/skills/`
       holds candidate skill packages.
 
-      Improve pass@1 by editing only the declared mutable surface:
-      `target/profile.cordis.yml`, `target/plugins/**`, `target/skills/**`,
-      `target/PLAYBOOK.md`, and `target/EVOLUTION_LOG.md`. Never edit
-      `target/agent.py`, `target/dsh_trajectory.py`, or `target/runners/**`.
+      Edit only the declared mutable surface. Never edit `target/agent.py`,
+      `target/dsh_trajectory.py`, or `target/runners/**`. Keep the profile valid
+      YAML and keep plugin imports resolvable. The sdk-minimal runtime is fixed:
+      only reference packages already installed in it, and never add npm
+      dependencies or import removed demo-spine packages. Do not copy evolution
+      workflow, evidence paths, or change-manifest requirements into runtime
+      prompts.
 
-      Read the debugger evidence first, choose one coherent change tied to a
-      concrete failure, and keep the profile valid YAML. The sdk-minimal runtime
-      is fixed: only reference packages already installed in it, and never add
-      npm dependencies or import removed demo-spine packages. Do not copy this
-      evolution workflow, evidence paths, or change-manifest requirements into
-      runtime prompts. Before finishing the turn, write the required AHE change
-      manifest; the harness snapshots `target/` when the turn ends.
+      The task prompt in this message defines the evidence to read, the addable
+      runtime capabilities, and the output to produce; follow it.
 
 - id: agent-default-model
   config:
@@ -46,26 +44,29 @@
         contextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW ?? 1000000)
 
 # Headless has no interactive approver; a one-shot meta session must never wait.
-# `never` rejects approval requests instead of hanging, so only workspace
-# sandbox actions (which need no approval) are used.
+# `never` rejects approval requests instead of hanging.
 - id: approval
   config:
     policy: never
 
-# Presets bundle a sandbox mode with an approval policy. Patching approval to
-# `never` no longer matches the built-in `workspace-write` preset (approval
-# `ask`), so declare the matching preset explicitly; otherwise service
+# Presets bundle a sandbox mode with an approval policy. This image has no
+# bwrap and the host kernel has no Landlock, so dsh's sandboxed bash fails
+# closed with "no sandbox backend"; the mutate agent could not run any command,
+# including the boot checks its prompt asks for. ``danger-full-access`` runs
+# commands unconfined inside this single-use container. Patching approval to
+# `never` no longer matches the built-in ``danger-full-access`` preset's
+# approval, so declare the matching preset explicitly; otherwise service
 # construction fails with "composed sandbox and approval defaults match no
 # preset".
 - id: permission
   config:
-    defaultPreset: evolve-workspace-write
+    defaultPreset: evolve-danger-full-access
     presets:
-      evolve-workspace-write:
-        sandbox: workspace-write
+      evolve-danger-full-access:
+        sandbox: danger-full-access
         approval: never
-        name: evolve-workspace-write
-        description: Write inside the workspace without approval prompts; escalation is rejected.
+        name: evolve-danger-full-access
+        description: Unconfined commands in the single-use mutation container, no approval prompts.
 
 # Session titles are unnecessary for one-shot runs and would spend an extra
 # model call on every invocation.

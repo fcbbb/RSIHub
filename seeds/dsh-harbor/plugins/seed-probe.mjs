@@ -9,10 +9,10 @@
  *   from the ctx that apply() receives.
  * - List the services you need in the inject array (e.g. ['tools']); cordis
  *   guarantees they are injected before apply runs.
- * - To explore the available API: the mutation session has
- *   cordis_inspect_list / cordis_inspect_query to enumerate services, events
- *   and tool schemas, and cordis_define + cordis_run to trial-run a plugin
- *   draft in memory before writing it to this directory.
+ * - To explore the available API, read the installed `@deepseek-ai/dsh-*`
+ *   packages in the runtime tree. The mutation session runs headless and
+ *   mounts no Host or inspector plugins, so `cordis_inspect_*`,
+ *   `cordis_define`, and `cordis_run` are unavailable here.
  * - At rollout time this plugin loads inside the Harbor task container, in the
  *   same process as the candidate's local bash tool.
  */

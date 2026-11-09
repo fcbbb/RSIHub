@@ -80,6 +80,11 @@ NODE_FEATURE_PROBE = "node --input-type=module -e 'process.stdout.write(String(i
 # Fixed container paths used by run(): the adapter stages its files here and
 # never depends on the host layout or on a docker-exec shell bridge.
 CANDIDATE_IN_CONTAINER = "/tmp/evolve-candidate"
+# Only the candidate runtime surface is staged into the task container. The
+# rest of the seed directory (README, adapter, runners, trajectory converter)
+# is evolution-side context and must never be visible to the benchmark-solving
+# agent.
+CANDIDATE_RUNTIME_ENTRIES = ("profile.cordis.yml", "plugins", "skills")
 OVERLAY_IN_CONTAINER = "/tmp/evolve-candidate.overlay.cordis.yml"
 HARBOR_PATCH_IN_CONTAINER = "/tmp/evolve-harbor.cordis.yml"
 RUNNER_IN_CONTAINER = "/tmp/evolve-sdk-run.mjs"
@@ -384,8 +389,10 @@ done
     @staticmethod
     def _tar_candidate(candidate: Path, destination: Path) -> Path:
         with tarfile.open(destination, "w:gz") as archive:
-            for child in candidate.iterdir():
-                archive.add(child, arcname=child.name)
+            for name in CANDIDATE_RUNTIME_ENTRIES:
+                child = candidate / name
+                if child.exists():
+                    archive.add(child, arcname=name)
         return destination
 
     async def _container_cwd(self, environment) -> str:

@@ -61,11 +61,11 @@
         "max_tokens": 64000,
         "reasoning_effort": "high"
       },
+      "debugger_max_retries": 2,
       "field_limit": 2000,
       "max_concurrent": 10,
       "max_tasks": 30,
       "pass_threshold": 1.0,
-      "retry_attempts": 1,
       "timeout_per_task": 600.0
     },
     "gate": {},
@@ -106,7 +106,6 @@
       "max_concurrent": 5,
       "max_tasks": 30,
       "pass_threshold": 1.0,
-      "retry_attempts": 1,
       "timeout_per_task": 600.0
     },
     "gate": {},
@@ -152,11 +151,11 @@
         "model": "openai/deepseek-v4.1-flash-1017",
         "runner": "harbor"
       },
+      "debugger_max_retries": 2,
       "field_limit": 2000,
       "max_concurrent": 10,
       "max_tasks": 30,
       "pass_threshold": 1.0,
-      "retry_attempts": 1,
       "timeout_per_task": 900.0
     },
     "gate": {},
@@ -206,11 +205,11 @@
         "model": "openai/deepseek-v4.1-flash-1017",
         "runner": "harbor"
       },
+      "debugger_max_retries": 2,
       "field_limit": 2000,
       "max_concurrent": 10,
       "max_tasks": 30,
       "pass_threshold": 1.0,
-      "retry_attempts": 1,
       "timeout_per_task": 900.0
     },
     "gate": {},
@@ -260,11 +259,11 @@
         "model": "openai/deepseek-v4.1-flash-1017",
         "runner": "harbor"
       },
+      "debugger_max_retries": 2,
       "field_limit": 2000,
       "max_concurrent": 10,
       "max_tasks": 30,
       "pass_threshold": 0.5,
-      "retry_attempts": 1,
       "timeout_per_task": 900.0
     },
     "gate": {},
@@ -314,11 +313,11 @@
         "model": "openai/deepseek-v4.1-flash-1017",
         "runner": "harbor"
       },
+      "debugger_max_retries": 2,
       "field_limit": 2000,
       "max_concurrent": 10,
       "max_tasks": 30,
       "pass_threshold": 1.0,
-      "retry_attempts": 1,
       "timeout_per_task": 900.0
     },
     "gate": {},

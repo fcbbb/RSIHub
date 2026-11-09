@@ -94,11 +94,21 @@ uv run --frozen ./runs/ahe_dsh/evolve run ./runs/ahe_dsh --max-generations 1 --c
   it.
 - `DSH_MODEL` is derived from the stage's `model` (the `openai/` prefix is
   stripped). `DSH_CONTEXT_WINDOW` is passed through `agent_env`.
-- Mutate runs with `DSH_PERMISSION_MODE=workspace-write` in
-  `/app/task/workspace`; the debugger runs with `DSH_PERMISSION_MODE=read-only`
-  in `/app/task` and reads `inputs/trace-evidence.json`.
-- The headless overlays patch only persona, model, approval, and the extra
-  session-title model call. They do not patch `sandbox-policy`, and they do not
+- The candidate may add any package the runtime already installs: profile rows
+  for `@deepseek-ai/dsh-*` tools, model providers, or MCP resources, local
+  `plugins/*.mjs`, and `skills/**` (enable with the installed `dsh-skill`,
+  `dsh-skill-filesystem` with
+  `customSkillDirs: ['/tmp/evolve-candidate/skills']`, and `dsh-tool-skill`
+  rows). Never add npm dependencies.
+- Mutate runs with `DSH_PERMISSION_MODE=danger-full-access` in
+  `/app/task/workspace` (the disposable mutation container has no usable
+  sandbox backend, so `workspace-write` fails closed before any command runs);
+  the debugger runs with `DSH_PERMISSION_MODE=danger-full-access` in
+  `/app/task` (the same no-sandbox-backend reason) and may run shell checks
+  against `inputs/trace-evidence.json`.
+- The headless overlays patch only persona, model, approval, the permission
+  preset, and the extra session-title model call. They do not patch
+  `sandbox-policy`, and they do not
   insert `terminal-*` or `persistent-bash` rows: headless already ships
   writable `tool-fs` and `tool-bash` over `dsh-base`.
 

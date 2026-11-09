@@ -80,7 +80,8 @@ def test_mutate_run_maps_env_and_writes_trajectory(tmp_path: Path) -> None:
     assert call["cwd"] == "/app/task/workspace"
     assert "--profile headless" in call["command"]
     assert "--patch /opt/evolve/dsh/headless.mutate.cordis.yml" in call["command"]
-    assert call["env"]["DSH_PERMISSION_MODE"] == "workspace-write"
+    assert call["env"]["DSH_PERMISSION_MODE"] == "danger-full-access"
+    assert call["timeout_sec"] == 3300
     assert call["env"]["DSH_MODEL"] == "gpt-5.4-2026-03-05"
     assert call["env"]["DEEPSEEK_API_KEY"] == "test-key"
     assert call["env"]["DEEPSEEK_BASE_URL"] == "https://example.invalid/v1"
@@ -92,7 +93,7 @@ def test_mutate_run_maps_env_and_writes_trajectory(tmp_path: Path) -> None:
     assert context.metadata["dsh"]["session_id"] == "s-1"
 
 
-def test_analyst_run_uses_read_only_overlay(tmp_path: Path) -> None:
+def test_analyst_run_uses_full_access_overlay(tmp_path: Path) -> None:
     environment = FakeEnvironment([ExecResult(stdout='{"type":"final","text":"analysis"}\n', stderr="", return_code=0)])
     agent = _agent(tmp_path, role="analyst")
 
@@ -101,7 +102,8 @@ def test_analyst_run_uses_read_only_overlay(tmp_path: Path) -> None:
     call = environment.calls[0]
     assert call["cwd"] == "/app/task"
     assert "--patch /opt/evolve/dsh/headless.analyst.cordis.yml" in call["command"]
-    assert call["env"]["DSH_PERMISSION_MODE"] == "read-only"
+    assert call["env"]["DSH_PERMISSION_MODE"] == "danger-full-access"
+    assert call["timeout_sec"] == 900
 
 
 def test_run_requires_a_final_event(tmp_path: Path) -> None:

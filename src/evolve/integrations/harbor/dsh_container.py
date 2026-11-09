@@ -4,9 +4,18 @@ The candidate being evolved stays on the host-side ``sdk-minimal`` runtime
 (``target.agent:DshAgent``).  This module runs the *meta* agents inside the
 ``evolve-mutate-dsh`` task image with ``dsh --profile headless``:
 
-* ``role=mutate`` edits ``/app/task/workspace`` under ``workspace-write``.
-* ``role=analyst`` reads ``/app/task/inputs/trace-evidence.json`` under
-  ``read-only`` and returns a report.
+* ``role=mutate`` edits ``/app/task/workspace`` under ``danger-full-access``.
+  dsh's sandboxed bash needs bwrap or Landlock, neither of which is available
+  in this disposable container image; ``workspace-write`` fails closed with
+  "no sandbox backend", so the mutate agent cannot run any command (including
+  the boot checks its prompt asks for). ``danger-full-access`` keeps the same
+  approval policy (``never``) but runs commands unconfined inside the
+  single-use mutation container.
+* ``role=analyst`` reads ``/app/task/inputs/trace-evidence.json`` and runs
+  read-only checks under ``danger-full-access``.  The debugger needs the same
+  unconfined shell as the mutator because this image has no sandbox backend;
+  its container is a separate single-use Harbor trial, so commands cannot
+  touch the candidate workspace.
 
 The role is an interface (``agent_kwargs.role``), not a separate class, so the
 recipe can keep every non-candidate agent fixed while still selecting mutate or
@@ -34,13 +43,13 @@ _ROLES = {
     "mutate": {
         "overlay": "headless.mutate.cordis.yml",
         "workdir": MUTATE_WORKDIR,
-        "permission_mode": "workspace-write",
+        "permission_mode": "danger-full-access",
         "timeout_s": 3300,
     },
     "analyst": {
         "overlay": "headless.analyst.cordis.yml",
         "workdir": ANALYST_WORKDIR,
-        "permission_mode": "read-only",
+        "permission_mode": "danger-full-access",
         "timeout_s": 900,
     },
 }

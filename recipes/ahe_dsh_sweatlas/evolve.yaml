@@ -10,10 +10,12 @@ target:
   seed: builtin-dsh-harbor
 
 surface:
+  # Keep the surface wide and freeze the Harbor seams by exclude, like
+  # hyperagents_dsh. The mutate control file lives at
+  # target/.ahe-change-manifest.json and must pass the install gate; the
+  # candidate runtime is staged by CANDIDATE_RUNTIME_ENTRIES regardless.
   include:
-    - target/profile.cordis.yml
-    - target/plugins/**
-    - target/skills/**
+    - target/**
   exclude:
     - target/agent.py
     - target/dsh_trajectory.py
@@ -89,7 +91,7 @@ evaluator:
   sampling: static
   tasks_per_round: 63
   repetitions: 1
-  n_concurrent: 8
+  n_concurrent: 16
   # The held-out 30% is evaluated once for gen/0 and once for the best
   # train-split candidate after the last generation.
   anchor: {final: true, every_rounds: 0}

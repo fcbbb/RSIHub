@@ -7,9 +7,11 @@ dataset. The candidate, debugger, and mutator are the same dsh containers as
 | Setting | Value | Why |
 | --- | --- | --- |
 | `evaluator.dataset` | `/home/fcbbb/RSI/benchmark/deep-swe/tasks` | 113 Harbor task directories, overridden by `--dataset`/`DATASET_PATH` |
-| `evaluator.tasks_per_round` | `113` | a round scores the whole dataset |
+| `evaluator.split` | `train 0.7 / gate 0.0 / sealed 0.3` | 79 train tasks per round; the 34 sealed tasks are the overfitting anchor |
+| `evaluator.tasks_per_round` | `79` | a round scores the whole train split |
+| `evaluator.anchor` | `final: true` | sealed anchor at gen-0 and after the final round |
 | `evaluator.partial_floor` | `0.8` | sparse infrastructure failures are scored as zero for that task; up to 20% missing evidence is tolerated |
-| `evaluator.n_concurrent` | `4` | every trial runs an agent container plus a separate verifier container |
+| `evaluator.n_concurrent` | `12` | every trial runs an agent container plus a separate verifier container |
 | `evaluator.agent_allowed_hosts` | the model host | merged into the agent-phase allowlist at run time |
 | `analyze.config.pass_threshold` | `1.0` | rewards are binary: `f2p` and `p2p` must both hold |
 
@@ -44,7 +46,7 @@ dsh needs an Anthropic Messages endpoint (`OPENAI_BASE_URL` is preferred over
 ## Run
 
 ```bash
-docker image inspect evolve-mutate-dsh:20261104-dsh021rc5
+docker image inspect evolve-mutate-dsh:20261112-dsh021rc5-musl
 
 uv run --frozen evolve init ./runs/ahe_dsh_deepswe \
   --recipe ahe_dsh_deepswe \
@@ -60,8 +62,12 @@ then contains only those N tasks, so `partial_floor: 0.8` tolerates at most
 
 The dsh runtime only starts on Node **>= 22.19** (`lib/bin.js` dispatches on
 `import.meta.main`; older releases exit 0 without reading the JSON-RPC
-stream). `install()` stages the runtime image's Node when the task image has
-none or an older one, and the runner fails with an explicit error otherwise.
+stream). When the task image has none or an older one, `install()` installs
+the runtime tree's `node-bin/dispatch`, which picks a glibc or musl build by
+the container's libc and verifies it starts. The tree also carries the musl
+PTY build and musl native addons, so an Alpine task image runs the same tree
+as a Debian one. A `DSH_RUNTIME_DIR` tree must be extracted from the current
+image; `prepare-runtime.sh` rejects one without that payload.
 
 On hosts where Harbor's egress sidecar drops UDP DNS (Docker 26 on older
 kernels; see `docs/guides/reviewbench.md`), an allowlist trial cannot resolve

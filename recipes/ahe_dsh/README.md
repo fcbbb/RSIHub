@@ -34,16 +34,37 @@ that container. The host therefore needs:
 - The `evolve-mutate-dsh` runtime image (built below).
 - **No** host Node runtime and **no** dsh Python SDK for the candidate path.
 
-The task image's own Node is reused only when it is **22.19 or newer**; dsh's
-`lib/bin.js` self-dispatches on `import.meta.main`, which older releases leave
-undefined (dsh then exits 0 without processing the JSON-RPC stream). When the
-image has no Node or an older one, `install()` stages the runtime image's Node
-into `/usr/local/bin/node` and the runner rejects anything still below 22.19
-with an explicit error.
+The task image's own Node is reused only when it actually evaluates
+`import.meta.main` (Node **22.19+**); dsh's `lib/bin.js` self-dispatches on it
+and older releases leave it undefined (dsh then exits 0 without processing the
+JSON-RPC stream). Otherwise `install()` installs the runtime tree's
+`node-bin/dispatch` as `/usr/local/bin/node`.
 
-The preflight hook (`evaluator/prepare-runtime.sh`) verifies docker and the
-runtime image, then exports `DSH_RUNTIME_IMAGE` / `DSH_DOCKER_BIN` to every
-trial.
+`dispatch` matters because benchmarks mix Debian/Ubuntu (glibc) task images
+with Alpine (musl) ones, and a Node built for one C library cannot boot on the
+other. The runtime tree therefore carries both builds plus musl's
+`libstdc++`/`libgcc`, picks by libc, and verifies the chosen binary actually
+starts. The tree also carries a musl `node-pty` build (the glibc prebuild loads
+on musl and then segfaults on the first PTY spawn) and musl variants of the
+native require hook and `sharp`.
+
+The preflight hook (`evaluator/prepare-runtime.sh`) verifies docker, the
+runtime image's payload, and the `DSH_MUTATE_IMAGE_ID` pin when set, then
+exports `DSH_RUNTIME_IMAGE` / `DSH_DOCKER_BIN` to every trial. When
+`DSH_RUNTIME_DIR` is set it validates that tree instead (the docker-free
+route) and requires the same payload.
+
+To exercise both libc families before a long run:
+
+```bash
+DSH_RUNTIME_IMAGE=evolve-mutate-dsh:20261112-dsh021rc5-musl \
+  sh recipes/ahe_dsh/evaluator/doctor_node_matrix.sh
+```
+
+The matrix extracts the tree, then runs `node --version`, the
+`import.meta.main` check, a PTY spawn, and `dsh --version` in the runtime image
+(glibc) and in the pinned `node:22-alpine` base (musl). It needs that base
+image locally, which is why it is not part of the default doctor smoke.
 
 ### Mutate and debugger (container side)
 
@@ -92,6 +113,11 @@ uv run --frozen ./runs/ahe_dsh/evolve run ./runs/ahe_dsh --max-generations 1 --c
 - `agent_kwargs.version` selects the dsh npm version baked into the image. It
   must match the image build argument; rebuild with `--rebuild` after changing
   it.
+- `containers/runtime-versions.env` holds `DSH_MUTATE_IMAGE` (the tag the
+  recipes build and preflight use) and an optional `DSH_MUTATE_IMAGE_ID` pin.
+  Tags are mutable, so when the pin is set `prepare-runtime.sh` fails if a
+  rebuild changed the image under the same tag; `setup_terminal_bench.sh`
+  prints the current ID to copy in.
 - `DSH_MODEL` is derived from the stage's `model` (the `openai/` prefix is
   stripped). `DSH_CONTEXT_WINDOW` is passed through `agent_env`.
 - The candidate may add any package the runtime already installs: profile rows

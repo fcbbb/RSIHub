@@ -49,7 +49,7 @@ OpenAI-compatible base is what the verifier's judge client uses.
 ## Run
 
 ```bash
-docker image inspect evolve-mutate-dsh:20261104-dsh021rc5
+docker image inspect evolve-mutate-dsh:20261112-dsh021rc5-musl
 
 uv run --frozen evolve init ./runs/ahe_dsh_sweatlas \
   --recipe ahe_dsh_sweatlas \
@@ -64,8 +64,13 @@ missing trials before the round is treated as infrastructure-failed.
 
 The dsh runtime only starts on Node **>= 22.19** (`lib/bin.js` dispatches on
 `import.meta.main`; older releases exit 0 without reading the JSON-RPC
-stream). `install()` stages the runtime image's Node when the task image has
-none or an older one, and the runner fails with an explicit error otherwise.
+stream). When the task image has none or an older one, `install()` installs
+the runtime tree's `node-bin/dispatch`, which picks a glibc or musl build by
+the container's libc and verifies it starts. SWE-Atlas is a mix of both
+(Alpine tasks used to segfault in the glibc `node-pty` prebuild), so the
+runtime tree also carries the musl PTY build and musl native addons. A
+`DSH_RUNTIME_DIR` tree must be extracted from the current image;
+`prepare-runtime.sh` rejects one without that payload.
 
 On hosts where Harbor's egress sidecar drops UDP DNS (Docker 26 on older
 kernels; see `docs/guides/reviewbench.md`), an allowlist trial cannot resolve

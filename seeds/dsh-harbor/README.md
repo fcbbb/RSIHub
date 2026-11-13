@@ -67,8 +67,19 @@ Each trial:
    `/opt/evolve-dsh`. The image trims that tree in the install layer
    (`containers/mutate-dsh/prune-runtime.sh`); every package a profile can name
    stays resolvable, but desktop/web UI, the inspector, and the optional
-   Office/speech engines are gone. Node is reused from the task image when it
-   is >= 22; otherwise `install()` extracts the image's Node as well.
+   Office/speech engines are gone.
+
+   The tree carries its own Node payload in `dsh/node-bin/`: a glibc build, a
+   musl build with `libstdc++`/`libgcc`, and a `dispatch` launcher that picks
+   by libc and verifies the candidate actually starts. Task images are a mix of
+   glibc and musl, and a Node built for one cannot boot on the other, so a
+   single host binary cannot serve both. `install()` also ships
+   `node_modules/node-pty/build/Release-musl/pty.node` (the glibc prebuild
+   loads on musl and then segfaults on the first PTY spawn) and the musl
+   variants of the require hook and `sharp`; `lib/utils.js` selects the PTY
+   build by libc. Node is reused from the task image when it is >= 22.19 and
+   actually evaluates `import.meta.main`; otherwise `dispatch` is installed as
+   `/usr/local/bin/node`.
 2. `run()` uploads the candidate runtime surface (`profile.cordis.yml`,
    `plugins/`, `skills/`), the materialized overlay, the frozen rollout patch,
    the in-container runner, and the instruction.
@@ -80,9 +91,28 @@ Each trial:
    `agent.py` converts the session log to `trajectory.json`.
 
 `DSH_TASK_TIMEOUT_SEC` bounds the turn (the runner also enforces an internal
-deadline and exits `124` on timeout). `DSH_RUNTIME_DIR` is a docker-free alternative to
-`DSH_RUNTIME_IMAGE`: point it at a directory containing `dsh/lib/bin.js` (and
-optionally `node`).
+deadline and exits `124` on timeout).
+
+`DSH_RUNTIME_DIR` is a docker-free alternative to `DSH_RUNTIME_IMAGE`: point
+it at a directory containing `dsh/lib/bin.js`. It must be a tree extracted from
+a current `evolve-mutate-dsh` image: `prepare-runtime.sh` rejects a directory
+whose `dsh/` lacks `node-bin/`, the musl Node libraries, the musl PTY build,
+or the musl addons. A tree without the payload only works for glibc task
+images. Extracting one is:
+
+```sh
+helper=$(docker create "$DSH_RUNTIME_IMAGE")
+mkdir -p ~/RSI/dsh-runtime
+docker cp "$helper:/usr/local/lib/node_modules/@deepseek-ai/dsh" ~/RSI/dsh-runtime/dsh
+docker rm -f "$helper"
+export DSH_RUNTIME_DIR=~/RSI/dsh-runtime
+```
+
+The host-side archive cache is keyed by image **ID**, and by a content
+fingerprint for a directory (`MANIFEST.sha256` when present), so patching a
+tree in place or rebuilding a tag cannot silently replay an old payload.
+`containers/runtime-versions.env` can pin `DSH_MUTATE_IMAGE_ID`, which makes
+`prepare-runtime.sh` fail if the tag no longer resolves to the reviewed image.
 
 Model routing follows the workspace's frozen identity: `OPENAI_BASE_URL` /
 `OPENAI_API_KEY` are mapped onto dsh's `DEEPSEEK_BASE_URL` / `DEEPSEEK_API_KEY`

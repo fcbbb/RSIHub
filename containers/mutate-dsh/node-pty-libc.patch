@@ -1,0 +1,24 @@
+--- a/lib/utils.js
++++ b/lib/utils.js
+@@ -15,8 +15,19 @@
+     return target;
+ }
+ function loadNativeModule(name) {
+-    // Check build, debug, and then prebuilds.
+-    var dirs = ['build/Release', 'build/Debug', "prebuilds/".concat(process.platform, "-").concat(process.arch)];
++    // Check build, debug, and then prebuilds. The prebuilt binary targets glibc
++    // and segfaults under musl, so Alpine/musl images prefer a locally compiled
++    // musl build staged at build/Release-musl.
++    var glibcRuntime = false;
++    try {
++        glibcRuntime = !!(process.report && process.report.getReport().header.glibcVersionRuntime);
++    }
++    catch (_a) {
++        glibcRuntime = false;
++    }
++    var dirs = glibcRuntime
++        ? ['build/Release', 'build/Debug', "prebuilds/".concat(process.platform, "-").concat(process.arch)]
++        : ['build/Release-musl', 'build/Release', 'build/Debug', "prebuilds/".concat(process.platform, "-").concat(process.arch)];
+     // Check relative to the parent dir for unbundled and then the current dir for bundled
+     var relative = ['..', '.'];
+     var lastError;

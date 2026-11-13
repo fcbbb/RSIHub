@@ -147,7 +147,7 @@
           "version": "0.2.1-rc.5"
         },
         "environment": "docker",
-        "image": "evolve-mutate-dsh:20261104-dsh021rc5",
+        "image": "evolve-mutate-dsh:20261112-dsh021rc5-musl",
         "model": "openai/deepseek-v4.1-flash-1017",
         "runner": "harbor"
       },
@@ -173,7 +173,7 @@
       ],
       "environment": "docker",
       "expose_gate_data": false,
-      "image": "evolve-mutate-dsh:20261104-dsh021rc5",
+      "image": "evolve-mutate-dsh:20261112-dsh021rc5-musl",
       "max_retries": 1,
       "model": "openai/deepseek-v4.1-flash-1017",
       "prompt_path": "target/profile.cordis.yml",
@@ -201,7 +201,7 @@
           "version": "0.2.1-rc.5"
         },
         "environment": "docker",
-        "image": "evolve-mutate-dsh:20261104-dsh021rc5",
+        "image": "evolve-mutate-dsh:20261112-dsh021rc5-musl",
         "model": "openai/deepseek-v4.1-flash-1017",
         "runner": "harbor"
       },
@@ -227,7 +227,7 @@
       ],
       "environment": "docker",
       "expose_gate_data": false,
-      "image": "evolve-mutate-dsh:20261104-dsh021rc5",
+      "image": "evolve-mutate-dsh:20261112-dsh021rc5-musl",
       "max_retries": 1,
       "model": "openai/deepseek-v4.1-flash-1017",
       "prompt_path": "target/profile.cordis.yml",
@@ -255,7 +255,7 @@
           "version": "0.2.1-rc.5"
         },
         "environment": "docker",
-        "image": "evolve-mutate-dsh:20261104-dsh021rc5",
+        "image": "evolve-mutate-dsh:20261112-dsh021rc5-musl",
         "model": "openai/deepseek-v4.1-flash-1017",
         "runner": "harbor"
       },
@@ -281,7 +281,7 @@
       ],
       "environment": "docker",
       "expose_gate_data": false,
-      "image": "evolve-mutate-dsh:20261104-dsh021rc5",
+      "image": "evolve-mutate-dsh:20261112-dsh021rc5-musl",
       "max_retries": 1,
       "model": "openai/deepseek-v4.1-flash-1017",
       "prompt_path": "target/profile.cordis.yml",
@@ -309,7 +309,7 @@
           "version": "0.2.1-rc.5"
         },
         "environment": "docker",
-        "image": "evolve-mutate-dsh:20261104-dsh021rc5",
+        "image": "evolve-mutate-dsh:20261112-dsh021rc5-musl",
         "model": "openai/deepseek-v4.1-flash-1017",
         "runner": "harbor"
       },
@@ -335,7 +335,7 @@
       ],
       "environment": "docker",
       "expose_gate_data": false,
-      "image": "evolve-mutate-dsh:20261104-dsh021rc5",
+      "image": "evolve-mutate-dsh:20261112-dsh021rc5-musl",
       "max_retries": 1,
       "model": "openai/deepseek-v4.1-flash-1017",
       "prompt_path": "target/profile.cordis.yml",

@@ -102,7 +102,18 @@ else
     PROBE+='command -v node >/dev/null; codex --version'
     EXPECTED="codex-cli $IMAGE_VERSION"
   elif [[ $RUNTIME_KIND == dsh ]]; then
-    PROBE+='command -v node >/dev/null; dsh --version'
+    # A bare `dsh --version` only exercises the glibc side of the runtime; the
+    # musl builds and the libc dispatcher are what Alpine task images need, and
+    # an image missing them otherwise fails per trial instead of here.
+    PROBE+='lib=/usr/local/lib/node_modules/@deepseek-ai/dsh; '
+    PROBE+='for f in node-bin/dispatch node-bin/node-glibc node-bin/musl-node/node '
+    PROBE+='node-bin/musl-node/libstdc++.so.6 node-bin/musl-node/libgcc_s.so.1 '
+    PROBE+='node_modules/node-pty/build/Release-musl/pty.node '
+    PROBE+='node_modules/@img/sharp-linuxmusl-x64/package.json '
+    PROBE+='node_modules/node-addon-require-builtin-linux-x64-musl/package.json; do '
+    PROBE+='[ -e "$lib/$f" ] || { echo "missing $f" >&2; exit 1; }; done; '
+    PROBE+='command -v node >/dev/null; "$lib/node-bin/dispatch" -e "" || exit 1; '
+    PROBE+='dsh --version'
     EXPECTED=$IMAGE_VERSION
   else
     PROBE+="command -v uv >/dev/null; /root/.local/share/uv/tools/mini-swe-agent/bin/python -c 'import importlib.metadata; print(importlib.metadata.version(\"mini-swe-agent\"))'"
@@ -113,6 +124,9 @@ else
   }
   [[ $OBSERVED == "$EXPECTED" ]] || { echo "image version mismatch; use --rebuild to replace it" >&2; exit 2; }
   echo "Validated mutation image: $IMAGE ($IMAGE_ID), version $IMAGE_VERSION"
+  if [[ $RUNTIME_KIND == dsh ]]; then
+    echo "Pin this runtime for reproducibility: DSH_MUTATE_IMAGE_ID=$IMAGE_ID (containers/runtime-versions.env)"
+  fi
 fi
 
 echo "Terminal-Bench 2.0 setup is ready at $READY_DATASET"

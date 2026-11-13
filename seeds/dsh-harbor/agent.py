@@ -10,7 +10,10 @@ results. Per trial it:
 2. in ``install()`` uploads ``@deepseek-ai/dsh`` (plus Node when the task image
    has none or one older than 22.19) from ``DSH_RUNTIME_IMAGE`` (the locally
    built dsh image) or a pre-extracted ``DSH_RUNTIME_DIR`` and extracts it
-   under ``/opt/evolve-dsh``,
+   under ``/opt/evolve-dsh``. The runtime tree carries its own Node payload in
+   ``node-bin/`` (a glibc and a musl build behind a libc dispatcher), because a
+   task image may be either glibc or musl and a Node built for one cannot boot
+   on the other,
 3. in ``run()`` uploads the candidate tree and cordis patches and executes
    ``runners/sdk_minimal_run.mjs`` inside the container, which drives
    ``dsh --profile sdk-minimal`` over its JSON-RPC stdio protocol,
@@ -50,10 +53,12 @@ from __future__ import annotations
 import asyncio
 import fcntl
 import functools
+import hashlib
 import importlib.util
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tarfile
 import tempfile
@@ -66,6 +71,11 @@ from harbor.models.trial.paths import EnvironmentPaths
 CONTAINER_RUNTIME_ROOT = "/opt/evolve-dsh"
 CONTAINER_DSH_BIN = f"{CONTAINER_RUNTIME_ROOT}/dsh/lib/bin.js"
 CONTAINER_NODE = "/usr/local/bin/node"
+# Self-contained Node payload that travels inside the dsh runtime tree, so both
+# runtime sources (image and directory) deliver it without extra host steps.
+# ``dispatch`` picks a glibc or musl build at run time; see containers/mutate-dsh.
+CONTAINER_NODE_BIN = f"{CONTAINER_RUNTIME_ROOT}/dsh/node-bin"
+CONTAINER_NODE_DISPATCH = f"{CONTAINER_NODE_BIN}/dispatch"
 RUNTIME_IMAGE_ENV = "DSH_RUNTIME_IMAGE"
 RUNTIME_DIR_ENV = "DSH_RUNTIME_DIR"
 
@@ -119,6 +129,34 @@ def _cache_key(image: str) -> str:
 
 
 @functools.lru_cache(maxsize=32)
+def _runtime_dir_fingerprint(runtime_dir: str) -> str:
+    """Content identity for a ``DSH_RUNTIME_DIR`` tree.
+
+    The tarball cache is keyed by this fingerprint. Keying on the path alone
+    meant that patching a tree in place (how the musl fixes were first made)
+    kept serving the archive built before the patch -- the container then ran
+    the old payload while the run reported the new one. A ``MANIFEST.sha256``
+    file, when present, wins so a published tree can pin its identity cheaply.
+    """
+    source = Path(runtime_dir).expanduser()
+    manifest = source / "MANIFEST.sha256"
+    if manifest.is_file():
+        return hashlib.sha256(manifest.read_bytes()).hexdigest()[:16]
+    digest = hashlib.sha256()
+    for path in sorted(source.rglob("*")):
+        try:
+            info = path.stat()
+        except OSError:
+            continue
+        if not stat.S_ISREG(info.st_mode):
+            continue
+        relative = path.relative_to(source).as_posix().encode("utf-8", "surrogateescape")
+        digest.update(relative + b"\0")
+        digest.update(f"{info.st_size}\0{info.st_mtime_ns}\n".encode("ascii"))
+    return digest.hexdigest()[:16]
+
+
+@functools.lru_cache(maxsize=32)
 def _image_identity(docker_bin: str, image: str) -> str:
     """Include the image ID so a rebuilt tag never reuses a stale cache."""
     inspected = _docker(
@@ -151,7 +189,12 @@ def _extract_from_image(docker_bin: str, image: str, staging: Path) -> None:
 
 
 def _node_from_image(docker_bin: str, image: str) -> Path:
-    """Extract the image's Node binary on demand (only if the task lacks one)."""
+    """Extract one Node binary from the runtime image (legacy trees only).
+
+    Only the glibc binary is copied, so this cannot serve a musl task image.
+    Runtime trees built from ``containers/mutate-dsh`` carry ``node-bin/``
+    instead, which ships both builds plus their shared libraries.
+    """
     root = Path(tempfile.gettempdir()) / "evolve-dsh-runtime" / f"node-{_cache_key(_image_identity(docker_bin, image))}"
     node = root / "node"
     if node.is_file():
@@ -177,7 +220,7 @@ def _runtime_tarball(docker_bin: str, image: str | None, runtime_dir: str | None
     lock plus an atomic rename keeps concurrent installs from rebuilding it.
     """
     if runtime_dir:
-        label = runtime_dir
+        label = f"{runtime_dir}@{_runtime_dir_fingerprint(runtime_dir)}"
     elif image:
         label = _image_identity(docker_bin, image)
     else:
@@ -333,9 +376,43 @@ done
         probe = await environment.exec(NODE_FEATURE_PROBE)
         return probe.return_code == 0 and (probe.stdout or "").strip() == "true"
 
+    async def _stage_tree_node(self, environment) -> bool:
+        """Install the runtime tree's libc-dispatched Node, when it ships one.
+
+        The tree carries both a glibc and a musl build plus the shared libraries
+        each needs, so a single installed dispatcher covers every task image.
+        Older trees predate ``node-bin/``; they fall back to the legacy path.
+        """
+        probe = await environment.exec(f"test -x {CONTAINER_NODE_DISPATCH}")
+        if probe.return_code != 0:
+            return False
+        await self.exec_as_root(environment, f"install -m 755 {CONTAINER_NODE_DISPATCH} {CONTAINER_NODE}")
+        return True
+
+    async def _node_diagnosis(self, environment) -> str:
+        """Explain why staging a Node did not make the container usable."""
+        version = await environment.exec("node --version")
+        observed = (version.stdout or version.stderr or "").strip() or "<no output>"
+        return (
+            "the task container cannot run dsh even after staging the runtime's Node "
+            f"(`node --version` -> {observed}). dsh needs a Node with `import.meta.main` "
+            "(>= 22.19) built for the container's libc: a glibc Node cannot start in a "
+            "musl (Alpine) image (`cannot execute: required file not found`), and a musl "
+            "Node needs the libstdc++/libgcc shipped in node-bin/musl-node (otherwise it "
+            "fails to relocate symbols). Rebuild the runtime image with "
+            "`scripts/setup_terminal_bench.sh` so it carries node-bin/."
+        )
+
     async def _ensure_node(self, environment, docker_bin: str, image: str | None, runtime_dir: str | None) -> None:
         if await self._node_ready(environment):
             return
+        if await self._stage_tree_node(environment):
+            if not await self._node_ready(environment):
+                raise RuntimeError(await self._node_diagnosis(environment))
+            return
+        # Legacy runtime trees (extracted before node-bin/ existed): upload one
+        # Node binary from the host. This cannot serve a task image with the
+        # other libc; it stays for backwards compatibility only.
         host_node: Path | None = None
         if runtime_dir:
             candidate = Path(runtime_dir).expanduser() / "node"
@@ -346,18 +423,11 @@ done
                 docker_bin = resolve_docker_bin(env={**os.environ, **self._extra_env})
             host_node = await asyncio.to_thread(_node_from_image, docker_bin, image)
         if host_node is None or not host_node.is_file():
-            raise RuntimeError(
-                "task container has no Node able to run dsh (needs import.meta.main, "
-                "i.e. >= 22.19) and no Node binary is available to stage"
-            )
+            raise RuntimeError(await self._node_diagnosis(environment))
         await environment.upload_file(str(host_node), "/tmp/evolve-node")
         await self.exec_as_root(environment, f"install -m 755 /tmp/evolve-node {CONTAINER_NODE}")
         if not await self._node_ready(environment):
-            check = await environment.exec("node --version")
-            raise RuntimeError(
-                f"staged Node {check.stdout.strip() or '<unknown>'} cannot run dsh "
-                "(needs import.meta.main, i.e. Node >= 22.19)"
-            )
+            raise RuntimeError(await self._node_diagnosis(environment))
 
     def get_version_command(self) -> str | None:
         return f"node {CONTAINER_DSH_BIN} --version"

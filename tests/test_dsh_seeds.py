@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import tarfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -73,10 +74,17 @@ def _load_harbor_agent():
 class _FakeEnvironment:
     """Stub container used to drive ``DshAgent._ensure_node`` in-process."""
 
-    def __init__(self, probe: str, readiness: list[bool], version: str = "22.9.0") -> None:
+    def __init__(
+        self,
+        probe: str,
+        readiness: list[bool],
+        version: str = "22.9.0",
+        tree_node: bool = False,
+    ) -> None:
         self.probe = probe
         self.readiness = list(readiness)
         self.version = version
+        self.tree_node = tree_node
         self.uploads: list[tuple[str, str]] = []
         self.root_commands: list[str] = []
 
@@ -85,6 +93,8 @@ class _FakeEnvironment:
             ready = self.readiness.pop(0) if self.readiness else False
             value = "true" if ready else "undefined"
             return SimpleNamespace(return_code=0, stdout=value, stderr="")
+        if command.startswith("test -x "):
+            return SimpleNamespace(return_code=0 if self.tree_node else 1, stdout="", stderr="")
         assert command == "node --version"
         return SimpleNamespace(return_code=0, stdout=f"v{self.version}\n", stderr="")
 
@@ -117,6 +127,16 @@ def test_ensure_node_keeps_a_node_that_supports_the_dsh_entry_point(tmp_path: Pa
     assert environment.root_commands == []
 
 
+def test_ensure_node_prefers_the_runtime_tree_dispatch(tmp_path: Path) -> None:
+    # The tree's node-bin/dispatch carries a glibc *and* a musl build, so a
+    # single installed file covers both libc families and no upload is needed.
+    module, agent, runtime_dir = _harbor_agent(tmp_path, runtime_node=False)
+    environment = _FakeEnvironment(module.NODE_FEATURE_PROBE, [False, True], tree_node=True)
+    asyncio.run(agent._ensure_node(environment, "", None, str(runtime_dir)))
+    assert environment.uploads == []
+    assert environment.root_commands == [f"install -m 755 {module.CONTAINER_NODE_DISPATCH} /usr/local/bin/node"]
+
+
 def test_ensure_node_stages_node_when_the_container_cannot_run_dsh(tmp_path: Path) -> None:
     # dsh's lib/bin.js silently no-ops without import.meta.main, so the
     # container's Node must be replaced rather than trusted by version string.
@@ -132,8 +152,45 @@ def test_ensure_node_stages_node_when_the_container_cannot_run_dsh(tmp_path: Pat
 def test_ensure_node_rejects_a_staged_node_that_still_cannot_run_dsh(tmp_path: Path) -> None:
     module, agent, runtime_dir = _harbor_agent(tmp_path)
     environment = _FakeEnvironment(module.NODE_FEATURE_PROBE, [False, False], version="22.9.0")
-    with pytest.raises(RuntimeError, match="cannot run dsh"):
+    with pytest.raises(RuntimeError, match="libc"):
         asyncio.run(agent._ensure_node(environment, "", None, str(runtime_dir)))
+
+
+def test_ensure_node_diagnosis_names_both_libc_failure_modes(tmp_path: Path) -> None:
+    module, agent, runtime_dir = _harbor_agent(tmp_path, runtime_node=False)
+    environment = _FakeEnvironment(module.NODE_FEATURE_PROBE, [False, False], version="18.20.1")
+    with pytest.raises(RuntimeError) as caught:
+        asyncio.run(agent._ensure_node(environment, "", None, str(runtime_dir)))
+    message = str(caught.value)
+    assert "v18.20.1" in message
+    assert "musl" in message and "glibc" in message
+
+
+def test_runtime_tarball_cache_key_tracks_directory_content(tmp_path: Path, monkeypatch) -> None:
+    # Patching a runtime tree in place must invalidate the cached tarball; the
+    # cache used to key on the path string alone, which silently replayed the
+    # payload built before the patch.
+    module, _, _ = _harbor_agent(tmp_path)
+    monkeypatch.setattr(module.tempfile, "gettempdir", lambda: str(tmp_path / "tmp"))
+    module._runtime_dir_fingerprint.cache_clear()
+    source = tmp_path / "runtime"
+    (source / "dsh" / "lib").mkdir(parents=True)
+    (source / "dsh" / "lib" / "bin.js").write_text("// dsh\n")
+    (source / "node").write_text("#!/bin/sh\n")
+
+    first = module._runtime_tarball("", None, str(source))
+    assert first.is_file()
+
+    patched = source / "dsh" / "lib" / "bin.js"
+    patched.write_text("// dsh\n// musl fix\n")
+
+    module._runtime_dir_fingerprint.cache_clear()
+    second = module._runtime_tarball("", None, str(source))
+    assert second.parent.name != first.parent.name
+    with tarfile.open(second) as archive:
+        extracted = archive.extractfile("dsh/lib/bin.js")
+        assert extracted is not None
+        assert b"musl fix" in extracted.read()
 
 
 def test_recipes_select_their_seed_variant() -> None:

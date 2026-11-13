@@ -208,7 +208,7 @@ def test_ahe_dsh_recipe_uses_headless_container_agents(tmp_path: Path) -> None:
     assert mutate["agent_kwargs"]["role"] == "mutate"
     debugger = rendered["operators"]["analyze"]["config"]["debugger"]
     assert debugger["agent_kwargs"]["role"] == "analyst"
-    assert debugger["image"] == "evolve-mutate-dsh:20261104-dsh021rc5"
+    assert debugger["image"] == "evolve-mutate-dsh:20261112-dsh021rc5-musl"
     assert rendered["operators"]["validate"]["operator"] == "node_check"
     for relative in (
         "agent.py",

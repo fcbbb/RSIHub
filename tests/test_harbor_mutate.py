@@ -414,6 +414,10 @@ def test_visible_run_inputs_do_not_merge_current_generation_twice(tmp_path: Path
     snapshot = run_dir / "rollout" / "certified-jobs" / "snapshot" / "job"
     snapshot.mkdir(parents=True)
     (snapshot / "result.json").write_text('{"reward": 1}\n')
+    # Write the fixture with the mode the assertion below expects: write_text
+    # applies the process umask, so a shared 0002 umask would otherwise make the
+    # copied file 0664 and fail a test that is not about umask handling.
+    (snapshot / "result.json").chmod(0o644)
     (run_dir / "rollout" / "harbor-state.json").write_text('{"schema_version": 1}\n')
     feedback = run_dir / "feedback" / "evidence"
     feedback.mkdir(parents=True)

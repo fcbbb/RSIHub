@@ -802,6 +802,40 @@ def test_convert_session_reads_logs_under_dsh_home_sessions(tmp_path: Path) -> N
     assert '"agent": "dsh"' in payload or '"agent":"dsh"' in payload
 
 
+def test_convert_session_reads_tool_results_as_plain_text_parts(tmp_path: Path) -> None:
+    module = _load_module("dsh_trajectory_tool_result", ROOT / "seeds" / "dsh" / "dsh_trajectory.py")
+    home = tmp_path / "dsh-home"
+    sessions = home / "sessions" / "trial1"
+    sessions.mkdir(parents=True)
+    (sessions / "session.jsonl").write_text(
+        '{"type":"user/message","data":{"content":[{"type":"text","text":"run it"}]}}\n'
+        '{"type":"assistant/message","data":{"message":{"content":[{"type":"text","text":"ok"},'
+        '{"type":"tool-call","id":"c1","name":"bash","arguments":"{\\"command\\":\\"echo hi\\"}"}]}}}\n'
+        '{"type":"tool/result","data":{"message":{"content":[{"type":"text","text":"hi\\n"}]}}}\n'
+    )
+    out = tmp_path / "trajectory.json"
+    module.convert_session(home, out)
+    payload = json.loads(out.read_text())
+    tool_steps = [step for step in payload["steps"] if step.get("source") == "tool"]
+    assert tool_steps == [{"source": "tool", "observation": {"results": [{"content": "hi\n"}]}}]
+    assert payload["skipped_records"] == 0
+
+
+def test_convert_session_still_reads_legacy_wrapped_tool_results(tmp_path: Path) -> None:
+    module = _load_module("dsh_trajectory_tool_result_legacy", ROOT / "seeds" / "dsh" / "dsh_trajectory.py")
+    home = tmp_path / "dsh-home"
+    sessions = home / "sessions" / "trial1"
+    sessions.mkdir(parents=True)
+    (sessions / "session.jsonl").write_text(
+        '{"type":"tool/result","data":{"message":{"content":[{"type":"tool-result",'
+        '"content":[{"type":"text","text":"legacy output"}]}]}}}\n'
+    )
+    out = tmp_path / "trajectory.json"
+    module.convert_session(home, out)
+    payload = json.loads(out.read_text())
+    assert payload["steps"] == [{"source": "tool", "observation": {"results": [{"content": "legacy output"}]}}]
+
+
 def test_materialize_candidate_overlay_handles_quote_styles_and_non_plugins(tmp_path: Path) -> None:
     helper = _load_module(
         "candidate_overlay_quotes",

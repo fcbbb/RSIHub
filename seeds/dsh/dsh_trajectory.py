@@ -5,7 +5,8 @@ dsh persists sessions as an event-stream jsonl: each line is
 
   user/message       data.content = [{type:"text", text}]
   assistant/message  data.message.content = [{type:"text",text} | {type:"tool-call",id,name,arguments}]
-  tool/result        data.message.content = [{type:"tool-result", content:[{type:"text",text}]}]
+  tool/result        data.message.content = [{type:"text", text}]  (current dsh SDK)
+                     or [{type:"tool-result", content:[{type:"text",text}]}] (older logs)
 
 Skipped: assistant/chunk streaming text/tool fragments (assistant/message already
 carries the full content), step/turn/session/request markers, inbox splices.
@@ -137,12 +138,23 @@ def _tool_call_parts(content: Any) -> list[dict[str, Any]]:
 
 
 def _tool_result_text(content: Any) -> str:
+    """Collect tool output from either tool/result content shape.
+
+    Current dsh SDKs write the result straight into the message content as text
+    parts (``[{type:"text", text}]``); older logs wrapped it as
+    ``[{type:"tool-result", content:[{type:"text", text}]}]``. Accept both so
+    sessions recorded by either SDK remain readable.
+    """
     if not isinstance(content, list):
-        return ""
+        return _text_parts(content)
     texts: list[str] = []
     for item in content:
-        if isinstance(item, dict) and item.get("type") == "tool-result":
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "tool-result":
             texts.append(_text_parts(item.get("content")))
+        elif item.get("type") == "text":
+            texts.append(_text_parts([item]))
     return "\n".join(text for text in texts if text)
 
 

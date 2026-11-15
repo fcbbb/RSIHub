@@ -46,7 +46,7 @@ dsh needs an Anthropic Messages endpoint (`OPENAI_BASE_URL` is preferred over
 ## Run
 
 ```bash
-docker image inspect evolve-mutate-dsh:20261112-dsh021rc5-musl
+docker image inspect evolve-mutate-dsh:20261113-dsh021rc5-musl
 
 uv run --frozen evolve init ./runs/ahe_dsh_deepswe \
   --recipe ahe_dsh_deepswe \

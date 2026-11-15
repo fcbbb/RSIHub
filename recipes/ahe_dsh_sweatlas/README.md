@@ -49,7 +49,7 @@ OpenAI-compatible base is what the verifier's judge client uses.
 ## Run
 
 ```bash
-docker image inspect evolve-mutate-dsh:20261112-dsh021rc5-musl
+docker image inspect evolve-mutate-dsh:20261113-dsh021rc5-musl
 
 uv run --frozen evolve init ./runs/ahe_dsh_sweatlas \
   --recipe ahe_dsh_sweatlas \

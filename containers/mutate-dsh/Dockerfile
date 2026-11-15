@@ -54,6 +54,16 @@ RUN npm install --global "@deepseek-ai/dsh@${DSH_VERSION}" \
     && rm /tmp/prune-runtime.sh \
     && dsh --version
 
+# The API-key adapter sends only `x-api-key`. Gateways that require
+# `Authorization: Bearer` (the shared vLLM endpoint behind /api/inference/v1)
+# answer 401, which makes every dsh role fail. Send both headers; the patch
+# fails the build if the upstream source no longer matches.
+COPY patch-api-key-auth.cjs /tmp/patch-api-key-auth.cjs
+RUN node /tmp/patch-api-key-auth.cjs \
+      /usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-llm-deepseek-api-key/lib/index.js \
+    && node --check /usr/local/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-llm-deepseek-api-key/lib/index.js \
+    && rm /tmp/patch-api-key-auth.cjs
+
 # node-pty ships prebuilt binaries that target glibc. On musl the prebuild still
 # loads (`require` succeeds) and then segfaults on the first PTY spawn, so the
 # dsh tree needs a musl build; lib/utils.js picks it by libc (node-pty-libc.patch).

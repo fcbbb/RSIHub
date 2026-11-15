@@ -41,7 +41,7 @@ TERMINAL_BENCH_DATASET = "terminal-bench-2-30-v1"
 CODEX_IMAGE = "evolve-mutate-codex:20260818-codex0146"
 CODEX_FULL_IMAGE = "evolve-mutate-codex:20260904-codex0149"
 MINISWE_IMAGE = "evolve-mutate-app:20260724-tools-mswe245"
-DSH_IMAGE = "evolve-mutate-dsh:20261112-dsh021rc5-musl"
+DSH_IMAGE = "evolve-mutate-dsh:20261113-dsh021rc5-musl"
 
 
 def _config(name: str) -> str:

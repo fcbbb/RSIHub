@@ -34,6 +34,9 @@
   config:
     apiKeyEnv: DEEPSEEK_API_KEY
     streamIdleTimeoutMs: 600000
+    # dsh's own default is 256000, which the gateway rejects when the model's
+    # max_model_len is 131072. Cap below that; DSH_MAX_TOKENS may override.
+    maxTokens: !!js Number(process.env.DSH_MAX_TOKENS ?? 49152)
     models:
       - id: !!js process.env.DSH_MODEL ?? 'deepseek-v4-flash'
         contextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW ?? 1000000)

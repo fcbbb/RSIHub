@@ -234,7 +234,7 @@ def test_setup_builds_dsh_image_for_ahe_dsh(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     build = next(call for call in calls if call[:2] == ["docker", "build"])
     assert "DSH_VERSION=0.2.1-rc.5" in build
-    assert build[build.index("-t") + 1] == "evolve-mutate-dsh:20261112-dsh021rc5-musl"
+    assert build[build.index("-t") + 1] == "evolve-mutate-dsh:20261113-dsh021rc5-musl"
     assert str(ROOT / "containers" / "mutate-dsh") in build[-1]
     probe = next(call for call in calls if call[:2] == ["docker", "run"])
     assert "dsh --version" in probe[-1]

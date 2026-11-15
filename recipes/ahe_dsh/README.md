@@ -57,7 +57,7 @@ route) and requires the same payload.
 To exercise both libc families before a long run:
 
 ```bash
-DSH_RUNTIME_IMAGE=evolve-mutate-dsh:20261112-dsh021rc5-musl \
+DSH_RUNTIME_IMAGE=evolve-mutate-dsh:20261113-dsh021rc5-musl \
   sh recipes/ahe_dsh/evaluator/doctor_node_matrix.sh
 ```
 

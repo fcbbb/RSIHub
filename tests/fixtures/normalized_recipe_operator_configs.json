@@ -140,14 +140,14 @@
       "debugger": {
         "agent": "evolve.integrations.harbor.dsh_container:DshContainerAgent",
         "agent_env": {
-          "DSH_CONTEXT_WINDOW": "1000000"
+          "DSH_CONTEXT_WINDOW": "131072"
         },
         "agent_kwargs": {
           "role": "analyst",
           "version": "0.2.1-rc.5"
         },
         "environment": "docker",
-        "image": "evolve-mutate-dsh:20261112-dsh021rc5-musl",
+        "image": "evolve-mutate-dsh:20261113-dsh021rc5-musl",
         "model": "openai/deepseek-v4.1-flash-1017",
         "runner": "harbor"
       },
@@ -162,7 +162,7 @@
     "mutate": {
       "agent": "evolve.integrations.harbor.dsh_container:DshContainerAgent",
       "agent_env": {
-        "DSH_CONTEXT_WINDOW": "1000000"
+        "DSH_CONTEXT_WINDOW": "131072"
       },
       "agent_kwargs": {
         "role": "mutate",
@@ -173,7 +173,7 @@
       ],
       "environment": "docker",
       "expose_gate_data": false,
-      "image": "evolve-mutate-dsh:20261112-dsh021rc5-musl",
+      "image": "evolve-mutate-dsh:20261113-dsh021rc5-musl",
       "max_retries": 1,
       "model": "openai/deepseek-v4.1-flash-1017",
       "prompt_path": "target/profile.cordis.yml",
@@ -194,14 +194,14 @@
       "debugger": {
         "agent": "evolve.integrations.harbor.dsh_container:DshContainerAgent",
         "agent_env": {
-          "DSH_CONTEXT_WINDOW": "1000000"
+          "DSH_CONTEXT_WINDOW": "131072"
         },
         "agent_kwargs": {
           "role": "analyst",
           "version": "0.2.1-rc.5"
         },
         "environment": "docker",
-        "image": "evolve-mutate-dsh:20261112-dsh021rc5-musl",
+        "image": "evolve-mutate-dsh:20261113-dsh021rc5-musl",
         "model": "openai/deepseek-v4.1-flash-1017",
         "runner": "harbor"
       },
@@ -216,7 +216,7 @@
     "mutate": {
       "agent": "evolve.integrations.harbor.dsh_container:DshContainerAgent",
       "agent_env": {
-        "DSH_CONTEXT_WINDOW": "1000000"
+        "DSH_CONTEXT_WINDOW": "131072"
       },
       "agent_kwargs": {
         "role": "mutate",
@@ -227,7 +227,7 @@
       ],
       "environment": "docker",
       "expose_gate_data": false,
-      "image": "evolve-mutate-dsh:20261112-dsh021rc5-musl",
+      "image": "evolve-mutate-dsh:20261113-dsh021rc5-musl",
       "max_retries": 1,
       "model": "openai/deepseek-v4.1-flash-1017",
       "prompt_path": "target/profile.cordis.yml",
@@ -248,14 +248,14 @@
       "debugger": {
         "agent": "evolve.integrations.harbor.dsh_container:DshContainerAgent",
         "agent_env": {
-          "DSH_CONTEXT_WINDOW": "1000000"
+          "DSH_CONTEXT_WINDOW": "131072"
         },
         "agent_kwargs": {
           "role": "analyst",
           "version": "0.2.1-rc.5"
         },
         "environment": "docker",
-        "image": "evolve-mutate-dsh:20261112-dsh021rc5-musl",
+        "image": "evolve-mutate-dsh:20261113-dsh021rc5-musl",
         "model": "openai/deepseek-v4.1-flash-1017",
         "runner": "harbor"
       },
@@ -270,7 +270,7 @@
     "mutate": {
       "agent": "evolve.integrations.harbor.dsh_container:DshContainerAgent",
       "agent_env": {
-        "DSH_CONTEXT_WINDOW": "1000000"
+        "DSH_CONTEXT_WINDOW": "131072"
       },
       "agent_kwargs": {
         "role": "mutate",
@@ -281,7 +281,7 @@
       ],
       "environment": "docker",
       "expose_gate_data": false,
-      "image": "evolve-mutate-dsh:20261112-dsh021rc5-musl",
+      "image": "evolve-mutate-dsh:20261113-dsh021rc5-musl",
       "max_retries": 1,
       "model": "openai/deepseek-v4.1-flash-1017",
       "prompt_path": "target/profile.cordis.yml",
@@ -302,14 +302,14 @@
       "debugger": {
         "agent": "evolve.integrations.harbor.dsh_container:DshContainerAgent",
         "agent_env": {
-          "DSH_CONTEXT_WINDOW": "1000000"
+          "DSH_CONTEXT_WINDOW": "131072"
         },
         "agent_kwargs": {
           "role": "analyst",
           "version": "0.2.1-rc.5"
         },
         "environment": "docker",
-        "image": "evolve-mutate-dsh:20261112-dsh021rc5-musl",
+        "image": "evolve-mutate-dsh:20261113-dsh021rc5-musl",
         "model": "openai/deepseek-v4.1-flash-1017",
         "runner": "harbor"
       },
@@ -324,7 +324,7 @@
     "mutate": {
       "agent": "evolve.integrations.harbor.dsh_container:DshContainerAgent",
       "agent_env": {
-        "DSH_CONTEXT_WINDOW": "1000000"
+        "DSH_CONTEXT_WINDOW": "131072"
       },
       "agent_kwargs": {
         "role": "mutate",
@@ -335,7 +335,7 @@
       ],
       "environment": "docker",
       "expose_gate_data": false,
-      "image": "evolve-mutate-dsh:20261112-dsh021rc5-musl",
+      "image": "evolve-mutate-dsh:20261113-dsh021rc5-musl",
       "max_retries": 1,
       "model": "openai/deepseek-v4.1-flash-1017",
       "prompt_path": "target/profile.cordis.yml",

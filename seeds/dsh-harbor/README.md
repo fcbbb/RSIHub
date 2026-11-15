@@ -24,14 +24,15 @@ Evolvable (the genome):
 - `skills/**` holds skill packages. sdk-minimal does not load them by default.
   A candidate enables them by adding the installed skill rows to the profile
   (`@deepseek-ai/dsh-skill`, `@deepseek-ai/dsh-skill-filesystem` with
-  `customSkillDirs: ['/tmp/evolve-candidate/skills']`, and
+  `customSkillDirs: ['/opt/evolve-dsh/state/candidate/skills']`, and
   `@deepseek-ai/dsh-tool-skill`) or by adding a provider plugin.
 
 The candidate may add any package the runtime already installs: profile rows
 for `@deepseek-ai/dsh-*` tools, model providers, or MCP resources, and local
 ESM plugins that register tools, providers, or lifecycle hooks through `ctx`.
-Never add npm dependencies. The runtime is staged at `/tmp/evolve-candidate`;
-plugins should resolve sibling paths from `import.meta.url`.
+Never add npm dependencies. The runtime is staged at
+`/opt/evolve-dsh/state/candidate`; plugins should resolve sibling paths from
+`import.meta.url`.
 
 Harness-side (in `surface.exclude`, candidates cannot edit):
 

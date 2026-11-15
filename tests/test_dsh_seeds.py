@@ -144,9 +144,12 @@ def test_ensure_node_stages_node_when_the_container_cannot_run_dsh(tmp_path: Pat
     environment = _FakeEnvironment(module.NODE_FEATURE_PROBE, [False, True])
     asyncio.run(agent._ensure_node(environment, "", None, str(runtime_dir)))
     assert environment.uploads == [
-        (str(runtime_dir / "node"), "/tmp/evolve-node"),
+        (str(runtime_dir / "node"), "/opt/evolve-dsh/node-staged"),
     ]
-    assert environment.root_commands == ["install -m 755 /tmp/evolve-node /usr/local/bin/node"]
+    assert environment.root_commands == [
+        "install -m 755 /opt/evolve-dsh/node-staged /usr/local/bin/node && "
+        "rm -f /opt/evolve-dsh/node-staged"
+    ]
 
 
 def test_ensure_node_rejects_a_staged_node_that_still_cannot_run_dsh(tmp_path: Path) -> None:
@@ -154,6 +157,45 @@ def test_ensure_node_rejects_a_staged_node_that_still_cannot_run_dsh(tmp_path: P
     environment = _FakeEnvironment(module.NODE_FEATURE_PROBE, [False, False], version="22.9.0")
     with pytest.raises(RuntimeError, match="libc"):
         asyncio.run(agent._ensure_node(environment, "", None, str(runtime_dir)))
+
+
+def test_stage_rollout_keeps_candidate_out_of_logs_and_tmp(tmp_path: Path) -> None:
+    # /logs/agent is a bind-mounted evidence directory and /tmp is the solving
+    # agent's own scratch; neither may carry the candidate or its overlay.
+    module, agent, _ = _harbor_agent(tmp_path)
+    candidate = tmp_path / "candidate"
+    (candidate / "plugins").mkdir(parents=True)
+    (candidate / "profile.cordis.yml").write_text(
+        "- insert:\n"
+        "    - id: plugin-seed-probe\n"
+        "      name: './plugins/seed-probe.mjs'\n"
+    )
+    (candidate / "plugins" / "seed-probe.mjs").write_text("export default {};\n")
+    cordis = tmp_path / "rollout.base.cordis.yml"
+    cordis.write_text("- id: terminal-bash\n  config: {}\n")
+    runner = tmp_path / "sdk_minimal_run.mjs"
+    runner.write_text("// runner\n")
+    task_file = tmp_path / "instruction.txt"
+    task_file.write_text("solve it\n")
+    environment = _FakeEnvironment(module.NODE_FEATURE_PROBE, [])
+
+    asyncio.run(agent._stage_rollout(environment, candidate, cordis, runner, task_file))
+
+    assert not (agent.logs_dir / "candidate.tar.gz").exists()
+    assert not (agent.logs_dir / "candidate.overlay.cordis.yml").exists()
+    destinations = {destination for _, destination in environment.uploads}
+    assert all(not destination.startswith("/tmp/") for destination in destinations)
+    assert f"{module.CONTAINER_STAGING_ROOT}/candidate.tar.gz" in destinations
+    assert module.OVERLAY_IN_CONTAINER in destinations
+    assert module.HARBOR_PATCH_IN_CONTAINER in destinations
+    assert module.RUNNER_IN_CONTAINER in destinations
+    assert module.TASK_IN_CONTAINER in destinations
+    assert environment.root_commands == [
+        f"rm -rf {module.CONTAINER_STAGING_ROOT} && mkdir -p {module.CANDIDATE_IN_CONTAINER}",
+        f"tar -xzf {module.CONTAINER_STAGING_ROOT}/candidate.tar.gz "
+        f"-C {module.CANDIDATE_IN_CONTAINER} && "
+        f"rm -f {module.CONTAINER_STAGING_ROOT}/candidate.tar.gz",
+    ]
 
 
 def test_ensure_node_diagnosis_names_both_libc_failure_modes(tmp_path: Path) -> None:

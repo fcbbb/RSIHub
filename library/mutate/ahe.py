@@ -132,13 +132,13 @@ packages):
             name: '@deepseek-ai/dsh-skill'
           - id: skill-filesystem
             name: '@deepseek-ai/dsh-skill-filesystem'
-            config: {customSkillDirs: ['/tmp/evolve-candidate/skills']}
+            config: {customSkillDirs: ['/opt/evolve-dsh/state/candidate/skills']}
           - id: tool-skill
             name: '@deepseek-ai/dsh-tool-skill'
   Rows that do not exist yet must go under `insert`; a bare `- id: ...` entry
   patches an existing row and dsh skips it with "entry not found". Alternatively
   add a plugin that registers a skill provider. The candidate runtime is
-  staged at `/tmp/evolve-candidate`; a local plugin should resolve sibling
+  staged at `/opt/evolve-dsh/state/candidate`; a local plugin should resolve sibling
   paths from `import.meta.url` rather than assuming the process cwd.
 
 Never edit `target/agent.py`, `target/dsh_trajectory.py`, or

@@ -87,18 +87,22 @@ RUNTIME_DIR_ENV = "DSH_RUNTIME_DIR"
 # so 23.x/24.0/24.1 installs are judged by what they actually support.
 NODE_FEATURE_PROBE = "node --input-type=module -e 'process.stdout.write(String(import.meta.main))'"
 
-# Fixed container paths used by run(): the adapter stages its files here and
-# never depends on the host layout or on a docker-exec shell bridge.
-CANDIDATE_IN_CONTAINER = "/tmp/evolve-candidate"
+# Fixed container paths used by run(): the adapter stages its files under the
+# runtime tree, outside both the task workspace (/app) and /tmp -- the agent's
+# own scratch -- so a normally-scoped agent does not encounter the candidate
+# while exploring. This is placement, not a permission boundary: the
+# in-container agent runs as root and can read these paths if it looks for them.
+CONTAINER_STAGING_ROOT = f"{CONTAINER_RUNTIME_ROOT}/state"
+CANDIDATE_IN_CONTAINER = f"{CONTAINER_STAGING_ROOT}/candidate"
 # Only the candidate runtime surface is staged into the task container. The
 # rest of the seed directory (README, adapter, runners, trajectory converter)
 # is evolution-side context and must never be visible to the benchmark-solving
 # agent.
 CANDIDATE_RUNTIME_ENTRIES = ("profile.cordis.yml", "plugins", "skills")
-OVERLAY_IN_CONTAINER = "/tmp/evolve-candidate.overlay.cordis.yml"
-HARBOR_PATCH_IN_CONTAINER = "/tmp/evolve-harbor.cordis.yml"
-RUNNER_IN_CONTAINER = "/tmp/evolve-sdk-run.mjs"
-TASK_IN_CONTAINER = "/tmp/evolve-task.txt"
+OVERLAY_IN_CONTAINER = f"{CONTAINER_STAGING_ROOT}/candidate.overlay.cordis.yml"
+HARBOR_PATCH_IN_CONTAINER = f"{CONTAINER_STAGING_ROOT}/harbor.cordis.yml"
+RUNNER_IN_CONTAINER = f"{CONTAINER_STAGING_ROOT}/sdk-run.mjs"
+TASK_IN_CONTAINER = f"{CONTAINER_STAGING_ROOT}/task.txt"
 CONTAINER_LOGS = EnvironmentPaths.agent_dir.as_posix()
 
 
@@ -156,6 +160,39 @@ def _runtime_dir_fingerprint(runtime_dir: str) -> str:
     return digest.hexdigest()[:16]
 
 
+def _cache_root() -> Path:
+    """Return the directory that holds the runtime tarball / Node caches.
+
+    ``EVOLVE_DSH_CACHE_DIR`` wins when set (useful for shared or read-only
+    ``/tmp``); otherwise the historical ``<tmp>/evolve-dsh-runtime`` is used.
+    """
+    override = os.environ.get("EVOLVE_DSH_CACHE_DIR")
+    if override:
+        return Path(override).expanduser()
+    return Path(tempfile.gettempdir()) / "evolve-dsh-runtime"
+
+
+def _writable_cache_root() -> Path:
+    """Return a cache root this process can actually write to.
+
+    ``/tmp`` is shared, so a previous root-run leaves ``/tmp/evolve-dsh-runtime``
+    owned by another user and unreadable. ``mkdir(exist_ok=True)`` then raises
+    ``FileExistsError`` (its ``is_dir()`` probe also hits EACCES) and every
+    trial install fails with an unrelated-looking error. Fall back to the
+    per-user cache instead of failing the rollout.
+    """
+    root = _cache_root()
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        root = Path.home() / ".cache" / "evolve-dsh-runtime"
+        root.mkdir(parents=True, exist_ok=True)
+    if not os.access(root, os.W_OK | os.X_OK):
+        root = Path.home() / ".cache" / "evolve-dsh-runtime"
+        root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
 @functools.lru_cache(maxsize=32)
 def _image_identity(docker_bin: str, image: str) -> str:
     """Include the image ID so a rebuilt tag never reuses a stale cache."""
@@ -195,7 +232,7 @@ def _node_from_image(docker_bin: str, image: str) -> Path:
     Runtime trees built from ``containers/mutate-dsh`` carry ``node-bin/``
     instead, which ships both builds plus their shared libraries.
     """
-    root = Path(tempfile.gettempdir()) / "evolve-dsh-runtime" / f"node-{_cache_key(_image_identity(docker_bin, image))}"
+    root = _writable_cache_root() / f"node-{_cache_key(_image_identity(docker_bin, image))}"
     node = root / "node"
     if node.is_file():
         return node
@@ -229,7 +266,7 @@ def _runtime_tarball(docker_bin: str, image: str | None, runtime_dir: str | None
             "(for example the image built by scripts/setup_terminal_bench.sh) "
             "or DSH_RUNTIME_DIR with an extracted dsh tree"
         )
-    root = Path(tempfile.gettempdir()) / "evolve-dsh-runtime" / _cache_key(label)
+    root = _writable_cache_root() / _cache_key(label)
     tarball = root / "dsh-runtime.tar.gz"
     ready = root / ".ready"
     if ready.is_file() and tarball.is_file():
@@ -362,10 +399,11 @@ done
         if image and not runtime_dir:
             docker_bin = resolve_docker_bin(env={**os.environ, **self._extra_env})
         tarball = await asyncio.to_thread(_runtime_tarball, docker_bin, image, runtime_dir)
-        await environment.upload_file(str(tarball), "/tmp/evolve-dsh-runtime.tar.gz")
+        await environment.upload_file(str(tarball), f"{CONTAINER_RUNTIME_ROOT}/runtime.tar.gz")
         await self.exec_as_root(
             environment,
-            "rm -rf /opt/evolve-dsh/dsh && tar -xzf /tmp/evolve-dsh-runtime.tar.gz -C /opt/evolve-dsh && "
+            "rm -rf /opt/evolve-dsh/dsh && tar -xzf /opt/evolve-dsh/runtime.tar.gz -C /opt/evolve-dsh && "
+            "rm -f /opt/evolve-dsh/runtime.tar.gz && "
             f"test -f {CONTAINER_DSH_BIN}",
         )
         await self._ensure_node(environment, docker_bin, image, runtime_dir)
@@ -424,8 +462,12 @@ done
             host_node = await asyncio.to_thread(_node_from_image, docker_bin, image)
         if host_node is None or not host_node.is_file():
             raise RuntimeError(await self._node_diagnosis(environment))
-        await environment.upload_file(str(host_node), "/tmp/evolve-node")
-        await self.exec_as_root(environment, f"install -m 755 /tmp/evolve-node {CONTAINER_NODE}")
+        await environment.upload_file(str(host_node), f"{CONTAINER_RUNTIME_ROOT}/node-staged")
+        await self.exec_as_root(
+            environment,
+            f"install -m 755 {CONTAINER_RUNTIME_ROOT}/node-staged {CONTAINER_NODE} && "
+            f"rm -f {CONTAINER_RUNTIME_ROOT}/node-staged",
+        )
         if not await self._node_ready(environment):
             raise RuntimeError(await self._node_diagnosis(environment))
 
@@ -465,6 +507,52 @@ done
                     archive.add(child, arcname=name)
         return destination
 
+    async def _stage_rollout(
+        self,
+        environment,
+        candidate: Path,
+        cordis: Path,
+        runner: Path,
+        task_file: Path,
+    ) -> None:
+        """Stage the candidate and frozen patches outside the agent's view.
+
+        ``/logs/agent`` is a bind-mounted evidence directory the solving agent
+        can read, and ``/tmp`` is its own scratch. Host artifacts therefore go
+        through a private temporary directory and land under the runtime's
+        state tree, not in the evidence directory or the scratch area.
+        """
+        with tempfile.TemporaryDirectory(prefix="evolve-dsh-stage-") as host_staging:
+            host = Path(host_staging)
+            archive = await asyncio.to_thread(
+                self._tar_candidate, candidate, host / "candidate.tar.gz"
+            )
+            overlay = materialize_candidate_overlay(
+                candidate,
+                host,
+                output_path=host / "candidate.overlay.cordis.yml",
+                plugin_root=Path(CANDIDATE_IN_CONTAINER),
+            )
+            await self.exec_as_root(
+                environment,
+                f"rm -rf {CONTAINER_STAGING_ROOT} && mkdir -p {CANDIDATE_IN_CONTAINER}",
+            )
+            await environment.upload_file(
+                str(archive), f"{CONTAINER_STAGING_ROOT}/candidate.tar.gz"
+            )
+            await self.exec_as_root(
+                environment,
+                f"tar -xzf {CONTAINER_STAGING_ROOT}/candidate.tar.gz -C {CANDIDATE_IN_CONTAINER} && "
+                f"rm -f {CONTAINER_STAGING_ROOT}/candidate.tar.gz",
+            )
+            for source, destination in (
+                (overlay, OVERLAY_IN_CONTAINER),
+                (cordis, HARBOR_PATCH_IN_CONTAINER),
+                (runner, RUNNER_IN_CONTAINER),
+                (task_file, TASK_IN_CONTAINER),
+            ):
+                await environment.upload_file(str(source), destination)
+
     async def _container_cwd(self, environment) -> str:
         result = await environment.exec("pwd")
         return (result.stdout or "").strip() or "/app"
@@ -483,27 +571,7 @@ done
         logs.mkdir(parents=True, exist_ok=True)
         task_file = logs / "instruction.txt"
         task_file.write_text(instruction)
-        archive = await asyncio.to_thread(self._tar_candidate, candidate, logs / "candidate.tar.gz")
-        overlay = materialize_candidate_overlay(
-            candidate,
-            logs,
-            output_path=logs / "candidate.overlay.cordis.yml",
-            plugin_root=Path(CANDIDATE_IN_CONTAINER),
-        )
-
-        await self.exec_as_root(
-            environment,
-            f"rm -rf {CANDIDATE_IN_CONTAINER} {TASK_IN_CONTAINER} && mkdir -p {CANDIDATE_IN_CONTAINER}",
-        )
-        await environment.upload_file(str(archive), "/tmp/evolve-candidate.tar.gz")
-        await self.exec_as_root(environment, f"tar -xzf /tmp/evolve-candidate.tar.gz -C {CANDIDATE_IN_CONTAINER}")
-        for source, destination in (
-            (overlay, OVERLAY_IN_CONTAINER),
-            (cordis, HARBOR_PATCH_IN_CONTAINER),
-            (runner, RUNNER_IN_CONTAINER),
-            (task_file, TASK_IN_CONTAINER),
-        ):
-            await environment.upload_file(str(source), destination)
+        await self._stage_rollout(environment, candidate, cordis, runner, task_file)
 
         model = self.model_name or "deepseek-v4-flash"
         if "/" in model:

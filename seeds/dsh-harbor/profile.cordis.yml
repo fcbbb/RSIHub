@@ -20,7 +20,7 @@
     includeRuntimeContext: false
     personaPrefix: |-
       You are an expert software engineer completing tasks in a Linux environment.
-      Work step by step: inspect the environment first, form a plan, then execute.
+      Work step by step: start from the task repository, form a plan, then execute.
       Verify your results before declaring completion; prefer running the task's own
       checks when they exist. Be persistent: if an approach fails, diagnose why and
       try another.
@@ -49,7 +49,8 @@
 
 # Optional runtime capabilities. Every package named here is already installed
 # in the evaluation runtime; never add npm dependencies. The candidate runtime
-# is staged at /tmp/evolve-candidate, so plugins should resolve sibling paths
+# is staged under the container runtime's state directory
+# (/opt/evolve-dsh/state/candidate), so plugins should resolve sibling paths
 # from import.meta.url.
 #
 # sdk-minimal does not load skill bundles by default. To enable skills/**,
@@ -61,7 +62,7 @@
 #     - id: skill-filesystem
 #       name: '@deepseek-ai/dsh-skill-filesystem'
 #       config:
-#         customSkillDirs: ['/tmp/evolve-candidate/skills']
+#         customSkillDirs: ['/opt/evolve-dsh/state/candidate/skills']
 #     - id: tool-skill
 #       name: '@deepseek-ai/dsh-tool-skill'
 #

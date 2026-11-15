@@ -124,7 +124,7 @@ uv run --frozen ./runs/ahe_dsh/evolve run ./runs/ahe_dsh --max-generations 1 --c
   for `@deepseek-ai/dsh-*` tools, model providers, or MCP resources, local
   `plugins/*.mjs`, and `skills/**` (enable with the installed `dsh-skill`,
   `dsh-skill-filesystem` with
-  `customSkillDirs: ['/tmp/evolve-candidate/skills']`, and `dsh-tool-skill`
+  `customSkillDirs: ['/opt/evolve-dsh/state/candidate/skills']`, and `dsh-tool-skill`
   rows). Never add npm dependencies.
 - Mutate runs with `DSH_PERMISSION_MODE=danger-full-access` in
   `/app/task/workspace` (the disposable mutation container has no usable

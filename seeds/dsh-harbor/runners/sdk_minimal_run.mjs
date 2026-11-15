@@ -3,7 +3,7 @@
  * container. The host-side Harbor adapter copies this file, the candidate
  * tree, and the materialized cordis patches into the container, then runs:
  *
- *   node /tmp/evolve-sdk-run.mjs
+ *   node /opt/evolve-dsh/state/sdk-run.mjs
  *
  * The dsh runtime therefore owns the model loop and the bash tool locally in
  * the task container. No host process participates in tool execution and no

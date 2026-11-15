@@ -10,6 +10,7 @@ represents.
 - [Agentic Harness Engineering for Codex](ahe_codex/README.md)
 - [Agentic Harness Engineering for DeepSeek Harness](ahe_dsh/README.md)
 - [Agentic Harness Engineering on ReviewBench](ahe_dsh_reviewbench/README.md)
+- [Agentic Harness Engineering on ReviewBench, five-task fast iteration](ahe_dsh_reviewbench_fast/README.md)
 - [Agentic Harness Engineering on SWE-Atlas unit tests](ahe_dsh_sweatlas/README.md)
 - [Agentic Harness Engineering on deep-swe](ahe_dsh_deepswe/README.md)
 - [GEPA](gepa/README.md)

@@ -297,6 +297,60 @@
     },
     "validate": {}
   },
+  "ahe_dsh_reviewbench_fast": {
+    "analyze": {
+      "debugger": {
+        "agent": "evolve.integrations.harbor.dsh_container:DshContainerAgent",
+        "agent_env": {
+          "DSH_CONTEXT_WINDOW": "131072"
+        },
+        "agent_kwargs": {
+          "role": "analyst",
+          "version": "0.2.1-rc.5"
+        },
+        "environment": "docker",
+        "image": "evolve-mutate-dsh:20261113-dsh021rc5-musl",
+        "model": "openai/deepseek-v4.1-flash-1017",
+        "runner": "harbor"
+      },
+      "debugger_max_retries": 2,
+      "field_limit": 2000,
+      "max_concurrent": 5,
+      "max_tasks": 5,
+      "pass_threshold": 0.5,
+      "timeout_per_task": 900.0
+    },
+    "gate": {},
+    "mutate": {
+      "agent": "evolve.integrations.harbor.dsh_container:DshContainerAgent",
+      "agent_env": {
+        "DSH_CONTEXT_WINDOW": "131072"
+      },
+      "agent_kwargs": {
+        "role": "mutate",
+        "version": "0.2.1-rc.5"
+      },
+      "editable_roots": [
+        "target"
+      ],
+      "environment": "docker",
+      "expose_gate_data": false,
+      "image": "evolve-mutate-dsh:20261113-dsh021rc5-musl",
+      "max_retries": 1,
+      "model": "openai/deepseek-v4.1-flash-1017",
+      "prompt_path": "target/profile.cordis.yml",
+      "runner": "harbor"
+    },
+    "record": {},
+    "rollout": {
+      "field_limit": 2000,
+      "pass_threshold": 1.0
+    },
+    "select": {
+      "seed": 0
+    },
+    "validate": {}
+  },
   "ahe_dsh_sweatlas": {
     "analyze": {
       "debugger": {

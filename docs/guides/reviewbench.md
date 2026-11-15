@@ -8,6 +8,11 @@ This guide covers the dataset contract, export, host preparation, baseline
 evaluation, the AHE iteration loop, and the failures that are specific to
 ReviewBench.
 
+> For pipeline iteration on a five-PR cohort instead of all 219, use
+> `ahe_dsh_reviewbench_fast` (see
+> [its README](../../recipes/ahe_dsh_reviewbench_fast/README.md)); it shares
+> this evaluator and only narrows the dataset and generation count.
+
 ## Scoring contract
 
 The evaluator uses `reward_schema: reviewbench`. The verifier reports counts
@@ -261,3 +266,4 @@ work. Raise it only after confirming the pool has room.
 | dsh returns `400 INVALID_REQUEST` | `OPENAI_BASE_URL` is still the OpenAI-compatible endpoint; use `/apps/anthropic` |
 | preflight rejects the runtime digest | set `REFRESH_RUNTIME_PIN=1`, or reinitialize after changing the endpoint |
 | a generation is `infrastructure_failed` with missing tasks | the trial set is incomplete; rerun the generation instead of reusing the failed round |
+| `RewardFileNotFoundError` and the verifier log says `candidate PR identity differs from golden on: repo` | the candidate wrote the repo as `owner/name` while the golden uses `https://github.com/owner/name`; keep `input-validation.ts` (which normalizes repo spellings) in sync with the ReviewBench checkout when copying a dataset |

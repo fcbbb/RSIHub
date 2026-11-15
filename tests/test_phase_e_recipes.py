@@ -12,6 +12,7 @@ SUPPORTED_RECIPES = {
     "ahe_dsh",
     "ahe_dsh_deepswe",
     "ahe_dsh_reviewbench",
+    "ahe_dsh_reviewbench_fast",
     "ahe_dsh_sweatlas",
     "gepa",
     "gepa_local",
@@ -28,12 +29,14 @@ LOCAL_MUTATE_RECIPES = {"hyperagents_dsh"}
 MAIN_RECIPES = SUPPORTED_RECIPES - {
     "gepa_local",
     "ahe_dsh_reviewbench",
+    "ahe_dsh_reviewbench_fast",
     "ahe_dsh_sweatlas",
     "ahe_dsh_deepswe",
 }
 DSH_RECIPES = {
     "ahe_dsh",
     "ahe_dsh_reviewbench",
+    "ahe_dsh_reviewbench_fast",
     "ahe_dsh_sweatlas",
     "ahe_dsh_deepswe",
 }
@@ -138,6 +141,15 @@ def test_supported_recipes_use_harbor_and_method_mutate() -> None:
             "record": "jsonl",
         },
         "ahe_dsh_reviewbench": {
+            "select": "ahe_latest",
+            "rollout": "parent_evaluation",
+            "analyze": "ahe",
+            "mutate": "ahe",
+            "validate": "node_check",
+            "gate": "ahe_artifact_valid",
+            "record": "jsonl",
+        },
+        "ahe_dsh_reviewbench_fast": {
             "select": "ahe_latest",
             "rollout": "parent_evaluation",
             "analyze": "ahe",
@@ -408,6 +420,7 @@ def test_explicit_recipe_retry_and_multiplier_values_stay_conservative() -> None
     # timeouts.
     timeout_headroom = {
         ("ahe_dsh_reviewbench", "agent_timeout_multiplier"): 2,
+        ("ahe_dsh_reviewbench_fast", "agent_timeout_multiplier"): 2,
         ("ahe_dsh_sweatlas", "verifier_timeout_multiplier"): 3,
     }
 

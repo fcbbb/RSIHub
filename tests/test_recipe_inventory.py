@@ -10,6 +10,7 @@ SUPPORTED = {
     "ahe_dsh",
     "ahe_dsh_deepswe",
     "ahe_dsh_reviewbench",
+    "ahe_dsh_reviewbench_fast",
     "ahe_dsh_sweatlas",
     "gepa",
     "gepa_local",

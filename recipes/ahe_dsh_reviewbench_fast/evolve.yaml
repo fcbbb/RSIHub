@@ -1,0 +1,118 @@
+experiment:
+  # Fast iteration: five pinned ReviewBench PRs, two generations. Use
+  # ahe_dsh_reviewbench for the full 219-task run.
+  id: ahe_dsh_reviewbench_fast
+  max_generations: 2
+  target_score: null
+  children_per_gen: 1
+  mode: driver
+  seed: 0
+
+target:
+  seed: builtin-dsh-harbor
+
+surface:
+  # Same wide surface and frozen Harbor seams as ahe_dsh_reviewbench.
+  include:
+    - target/**
+  exclude:
+    - target/agent.py
+    - target/dsh_trajectory.py
+    - target/runners/**
+
+operators:
+  select:
+    operator: ahe_latest
+    timeout_s: 600
+    config: {}
+  rollout:
+    operator: parent_evaluation
+    timeout_s: 9000
+    config:
+      field_limit: 2000
+      # The cohort is the dataset, not an operator knob: this recipe is meant
+      # for ../reviewbench-ahe/dataset-fast (five pinned PRs exported from the
+      # 219-task ReviewBench set). `tasks_per_round` then selects all five and
+      # every generation sees the same tasks, so transitions stay comparable.
+  analyze:
+    operator: ahe
+    # 5 tasks, all in parallel, up to 3 debugger attempts at 900 s each.
+    timeout_s: 5400
+    config:
+      max_tasks: 5
+      max_concurrent: 5
+      timeout_per_task: 900
+      debugger_max_retries: 2
+      field_limit: 2000
+      # ReviewBench rewards are continuous F1. The default 1.0 labels every
+      # imperfect review as failed; lower it if the debugger becomes noisy.
+      pass_threshold: 0.5
+      debugger:
+        runner: harbor
+        agent: evolve.integrations.harbor.dsh_container:DshContainerAgent
+        model: openai/deepseek-v4.1-flash-1017
+        environment: docker
+        image: evolve-mutate-dsh:20261113-dsh021rc5-musl
+        agent_kwargs: {role: analyst, version: 0.2.1-rc.5}
+        agent_env: {DSH_CONTEXT_WINDOW: "131072"}
+  mutate:
+    operator: ahe
+    # DshContainerAgent caps one attempt at 3300 s, and max_retries=1 below asks
+    # Harbor for a second attempt. A 3600 s operator budget killed that retry
+    # after ~5 minutes instead of giving it its own window. Budget both
+    # attempts plus container setup and artifact collection: 2 * 3300 + 1400.
+    timeout_s: 8000
+    config:
+      runner: harbor
+      expose_gate_data: false
+      agent: evolve.integrations.harbor.dsh_container:DshContainerAgent
+      model: openai/deepseek-v4.1-flash-1017
+      environment: docker
+      image: evolve-mutate-dsh:20261113-dsh021rc5-musl
+      editable_roots: [target]
+      prompt_path: target/profile.cordis.yml
+      agent_kwargs: {role: mutate, version: 0.2.1-rc.5}
+      agent_env: {DSH_CONTEXT_WINDOW: "131072"}
+      max_retries: 1
+  validate:
+    operator: node_check
+    timeout_s: 300
+    config: {}
+  gate:
+    operator: ahe_artifact_valid
+    timeout_s: 600
+    config: {}
+  record:
+    operator: jsonl
+    timeout_s: 600
+    config: {}
+  timeout_s: 600
+
+evaluator:
+  engine: harbor
+  model: openai/deepseek-v4.1-flash-1017
+  dataset: reviewbench-test
+  agent: target.agent:DshAgent
+  task_scope: full
+  evaluation_split: train
+  sampling: static
+  # Must match len(operators.rollout.config.task_names).
+  tasks_per_round: 5
+  repetitions: 1
+  n_concurrent: 5
+  max_retries: 1
+  benchmark_timeout_is_zero: true
+  partial_floor: 1.0
+  # ReviewBench scoring: augmented F1 per PR, undefined PRs imputed to the
+  # defined mean. The schema validator requires partial_floor 1.0 here.
+  reward_schema: reviewbench
+  # The dsh candidate talks to the shared vLLM gateway, not Aliyun MaaS. The
+  # host must be injected here because the exported tasks keep
+  # `[agent].network_mode = "allowlist"` with no hosts of their own.
+  agent_allowed_hosts:
+    - 10.62.64.38
+  # task.toml ships agent timeout_sec = 900; give the dsh candidate 1800 s.
+  agent_timeout_multiplier: 2
+  agent_env:
+    DSH_TASK_TIMEOUT_SEC: "1800"
+    DSH_RUNTIME_IMAGE: evolve-mutate-dsh:20261113-dsh021rc5-musl

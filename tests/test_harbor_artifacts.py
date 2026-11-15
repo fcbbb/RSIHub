@@ -635,3 +635,203 @@ def test_reviewbench_replay_envelope_preserves_metric_counts(tmp_path: Path) -> 
     assert rewards["rb_schema"] == 1
     assert rewards["overall.candidate_count"] == 1
     assert rewards["by_severity.major.candidate_count"] == 1
+    assert envelope["verifier_evidence"]["status"] == "scored"
+
+
+def test_replay_envelope_projects_scalar_rewards_and_ctrf_evidence(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("EVOLVE_PROXY_TOKEN", "supersecret")
+    jobs = tmp_path / "jobs"
+    trial_dir = jobs / "case-a__one"
+    write_trial(trial_dir, task="case-a", trial="one", reward=1.0)
+    payload = json.loads((trial_dir / "result.json").read_text())
+    payload["verifier_result"]["rewards"] = {
+        "reward": 1.0,
+        "f2p_total": 2,
+        "f2p_passed": 2,
+        "p2p_total": 1,
+        "p2p_passed": 1,
+        "note": "not-a-reward-field-to-drop",
+    }
+    payload["environment_setup"] = {"started_at": "2026-11-14T00:00:00Z", "finished_at": "2026-11-14T00:00:02Z"}
+    payload["verifier"] = {"duration_s": 3.5}
+    (trial_dir / "result.json").write_text(json.dumps(payload))
+    verifier = trial_dir / "verifier"
+    reports = verifier / "reports"
+    reports.mkdir(parents=True)
+    (verifier / "ctrf.json").write_text(
+        json.dumps(
+            {
+                "reportFormat": "CTRF",
+                "results": {
+                    "tool": {"name": "pytest"},
+                    "tests": [
+                        {"name": "[p2p] tests/test_api.py::test_existing", "status": "passed"},
+                        {
+                            "name": "[f2p] tests/test_api.py::test_new_behavior",
+                            "status": "failed",
+                            "message": "assert 1 == 2; EVOLVE_PROXY_TOKEN=supersecret",
+                        },
+                    ],
+                },
+            }
+        )
+    )
+    (reports / "base-ctrf.json").write_text(
+        json.dumps(
+            {
+                "reportFormat": "CTRF",
+                "results": {"tests": [{"name": "[f2p] tests/test_api.py::test_new_behavior", "status": "passed"}]},
+            }
+        )
+    )
+
+    write_harbor_artifacts(jobs, tmp_path / "run")
+
+    envelope = json.loads((trial_dir / "evolve-replay.json").read_text())
+    assert envelope["schema_version"] == 2
+    rewards = envelope["verifier_result"]["rewards"]
+    assert rewards == {"f2p_passed": 2, "f2p_total": 2, "p2p_passed": 1, "p2p_total": 1, "reward": 1.0}
+    evidence = envelope["verifier_evidence"]
+    assert evidence["schema_version"] == "verifier-evidence-v1"
+    assert evidence["status"] == "scored"
+    assert evidence["completeness"] == "full"
+    assert evidence["missing"] == []
+    assert evidence["counts"] == {"total": 2, "passed": 1, "failed": 1}
+    assert evidence["timing"] == {"environment_setup": 2.0, "verifier": 3.5}
+    assert [(failure["category"], failure["id"], failure["status"]) for failure in evidence["failures"]] == [
+        ("f2p", "tests/test_api.py::test_new_behavior", "failed")
+    ]
+    assert "supersecret" not in json.dumps(envelope)
+
+
+def test_replay_envelope_parses_junit_and_tap_reports(tmp_path: Path) -> None:
+    jobs = tmp_path / "jobs"
+    trial_dir = jobs / "case-a__one"
+    write_trial(trial_dir, task="case-a", trial="one", reward=0.0)
+    verifier = trial_dir / "verifier"
+    verifier.mkdir()
+    (verifier / "junit.xml").write_text(
+        "<testsuites><testsuite name='suite'>"
+        "<testcase classname='tests.test_x' name='test_ok'/>"
+        "<testcase classname='tests.test_x' name='test_bad'><failure message='boom'/></testcase>"
+        "<testcase classname='tests.test_x' name='test_err'><error message='crash'/></testcase>"
+        "<testcase classname='tests.test_x' name='test_skip'><skipped/></testcase>"
+        "</testsuite></testsuites>"
+    )
+    (verifier / "suite.tap").write_text("ok 1 - tap_ok\nnot ok 2 - tap_bad\nok 3 - tap_skip # SKIP\n")
+
+    write_harbor_artifacts(jobs, tmp_path / "run")
+
+    evidence = json.loads((trial_dir / "evolve-replay.json").read_text())["verifier_evidence"]
+    assert evidence["counts"] == {"total": 7, "passed": 2, "failed": 3, "skipped": 2}
+    identifiers = {failure["id"] for failure in evidence["failures"]}
+    assert identifiers == {"test_bad", "test_err", "tap_bad"}
+
+
+def test_replay_envelope_marks_partial_evidence_when_only_reward_exists(tmp_path: Path) -> None:
+    jobs = tmp_path / "jobs"
+    trial_dir = jobs / "case-a__one"
+    write_trial(trial_dir, task="case-a", trial="one", reward=0.0)
+
+    write_harbor_artifacts(jobs, tmp_path / "run")
+
+    evidence = json.loads((trial_dir / "evolve-replay.json").read_text())["verifier_evidence"]
+    assert evidence["status"] == "scored"
+    assert evidence["completeness"] == "partial"
+    assert evidence["missing"] == ["detail", "timing"]
+    assert evidence["counts"] == {}
+    assert evidence["failures"] == []
+
+
+def test_replay_envelope_parses_sweatlas_structured_evidence(tmp_path: Path) -> None:
+    jobs = tmp_path / "jobs"
+    trial_dir = jobs / "case-a__one"
+    write_trial(trial_dir, task="case-a", trial="one", reward=0.0)
+    verifier = trial_dir / "verifier"
+    verifier.mkdir()
+    (verifier / "evaluation_results.json").write_text(
+        json.dumps(
+            {
+                "overall_pass": False,
+                "manifest_pass": False,
+                "mutation_pass": False,
+                "rubrics_pass": False,
+                "mutation_testing": {
+                    "baseline": {
+                        "tests": [
+                            {"name": "keyBy > passes", "status": "PASSED"},
+                            {"name": "keyBy > fails", "status": "FAILED"},
+                        ]
+                    },
+                    "mutation": {"tests": [{"name": "keyBy > passes", "status": "FAILED"}]},
+                    "mutation_not_failed_relevant_tests": ["keyBy > passes"],
+                },
+                "rubrics": {
+                    "rubric_scores": [
+                        {"id": "r1", "title": "validates input", "passes": False, "score": {"justification": "missing"}}
+                    ]
+                },
+            }
+        )
+    )
+
+    write_harbor_artifacts(jobs, tmp_path / "run")
+
+    evidence = json.loads((trial_dir / "evolve-replay.json").read_text())["verifier_evidence"]
+    assert evidence["counts"] == {"total": 8, "passed": 1, "failed": 7}
+    assert evidence["completeness"] == "partial"
+    assert evidence["missing"] == ["timing"]
+    observed = {(failure["category"], failure["id"]) for failure in evidence["failures"]}
+    assert ("baseline", "keyBy > fails") in observed
+    assert ("mutation", "keyBy > passes") in observed
+    assert ("rubric", "validates input") in observed
+    assert {("gate", gate) for gate in ("overall", "manifest", "mutation", "rubrics")} <= observed
+
+
+def test_replay_envelope_parses_reviewbench_structured_evidence(tmp_path: Path) -> None:
+    jobs = tmp_path / "jobs"
+    trial_dir = jobs / "case-a__one"
+    write_reviewbench_trial(
+        trial_dir,
+        task="case-a",
+        trial="one",
+        counts=_counts(candidate=1, matched_tp=1, golden_tp=1, golden_covered=1),
+    )
+    verifier = trial_dir / "verifier"
+    verifier.mkdir()
+    (verifier / "scores.details.json").write_text(
+        json.dumps(
+            [
+                {
+                    "pr_key": "pr-1",
+                    "candidate_findings": [
+                        {
+                            "file": "pkg/module.py",
+                            "start_line": 3,
+                            "end_line": 3,
+                            "status": "matched_tp",
+                            "result_category": "testing",
+                            "message": "genuine finding",
+                        },
+                        {
+                            "file": "pkg/module.py",
+                            "start_line": 9,
+                            "end_line": 10,
+                            "status": "matched_fp",
+                            "result_category": "reliability",
+                            "message": "not a real defect",
+                        },
+                    ],
+                }
+            ]
+        )
+    )
+
+    write_harbor_artifacts(jobs, tmp_path / "run", reward_schema="reviewbench")
+
+    evidence = json.loads((trial_dir / "evolve-replay.json").read_text())["verifier_evidence"]
+    assert evidence["counts"] == {"total": 2, "passed": 1, "failed": 1}
+    assert evidence["status"] == "scored"
+    assert [(failure["id"], failure["category"]) for failure in evidence["failures"]] == [
+        ("pkg/module.py:9-10", "reliability")
+    ]

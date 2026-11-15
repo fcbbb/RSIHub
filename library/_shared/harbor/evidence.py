@@ -438,18 +438,91 @@ def _trajectory_details(trial_dir: Path, field_limit: int) -> dict[str, Any]:
     }
 
 
-def _verifier_output(trial_dir: Path, field_limit: int) -> str:
+def _render_verifier_evidence(evidence: Mapping[str, Any], limit: int) -> str:
+    """Render the canonical, benchmark-independent verifier evidence as text.
+
+    The certified boundary only carries this normalized object, so analysis sees
+    the same failure names, counts, and statuses it would have parsed from raw
+    verifier files.
+    """
+    lines = [
+        "[verifier-evidence]",
+        f"schema: {_clip(evidence.get('schema_version') or '', limit)}",
+        f"status: {_clip(evidence.get('status') or '', limit)}",
+        f"completeness: {_clip(evidence.get('completeness') or '', limit)}",
+    ]
+    missing = evidence.get("missing")
+    if isinstance(missing, list) and missing:
+        lines.append(f"missing: {', '.join(_clip(item, limit) for item in missing if isinstance(item, str))}")
+    counts = evidence.get("counts")
+    if isinstance(counts, dict) and counts:
+        rendered = ", ".join(
+            f"{key}={value}" for key, value in sorted(counts.items()) if isinstance(key, str) and isinstance(value, int)
+        )
+        if rendered:
+            lines.append(f"counts: {rendered}")
+    timing = evidence.get("timing")
+    if isinstance(timing, dict) and timing:
+        rendered = ", ".join(
+            f"{key}={value}s"
+            for key, value in sorted(timing.items())
+            if isinstance(key, str) and isinstance(value, (int, float))
+        )
+        if rendered:
+            lines.append(f"timing: {rendered}")
+    failures = evidence.get("failures")
+    entries: list[str] = []
+    if isinstance(failures, list):
+        for failure in failures[:10]:
+            if not isinstance(failure, dict):
+                continue
+            category = _clip(failure.get("category") or "", limit)
+            identifier = _clip(failure.get("id") or "", limit)
+            status = _clip(failure.get("status") or "", limit)
+            label = f"{category}/{identifier}" if category else identifier
+            message = _clip(failure.get("message") or "", limit)
+            entries.append(f"- [{status}] {label}" + (f": {message}" if message else ""))
+    # Keep the header (status/counts/completeness) even when the failure lines
+    # alone would blow the budget: it was previously truncated from the front
+    # whenever a benchmark produced more than two or three failures.
+    header = _clip("\n".join(lines), limit)
+    if not entries:
+        return header
+    remaining = limit - len(header) - 1
+    if remaining <= 0:
+        return header
+    body = ["failures:"]
+    for entry in entries:
+        if len("\n".join([*body, entry])) > remaining:
+            break
+        body.append(entry)
+    if len(body) == 1:
+        body.append(_clip(entries[0], max(1, remaining - len("failures:") - 1)))
+    return _clip(f"{header}\n" + "\n".join(body), limit)
+
+
+def _verifier_evidence_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    evidence = payload.get("verifier_evidence")
+    if not isinstance(evidence, dict) or not evidence.get("schema_version"):
+        return {}
+    return evidence
+
+
+def _verifier_output(trial_dir: Path, field_limit: int, evidence: Mapping[str, Any] | None = None) -> str:
     verifier_dir = trial_dir / "verifier"
-    if not verifier_dir.exists():
-        return ""
     parts: list[str] = []
-    for path in sorted(verifier_dir.rglob("*")):
-        if not path.is_file() or path.name in {"reward.txt", "reward.json"}:
-            continue
-        text = _read_text(path, field_limit, tail=True)
-        if text:
-            parts.append(f"[{path.relative_to(verifier_dir).as_posix()}]\n{text}")
-    return _clip("\n\n".join(parts), field_limit * 2, tail=True)
+    if verifier_dir.exists():
+        for path in sorted(verifier_dir.rglob("*")):
+            if not path.is_file() or path.name in {"reward.txt", "reward.json"}:
+                continue
+            text = _read_text(path, field_limit, tail=True)
+            if text:
+                parts.append(f"[{path.relative_to(verifier_dir).as_posix()}]\n{text}")
+    if parts:
+        return _clip("\n\n".join(parts), field_limit * 2, tail=True)
+    if evidence:
+        return _render_verifier_evidence(evidence, field_limit * 2)
+    return ""
 
 
 def _artifact_inventory(trial_dir: Path) -> dict[str, list[str]]:
@@ -640,6 +713,7 @@ def collect_cases(
         verifier_result = verifier_result if isinstance(verifier_result, dict) else {}
         verifier_rewards = verifier_result.get("rewards")
         verifier_rewards = verifier_rewards if isinstance(verifier_rewards, dict) else {}
+        verifier_evidence = _verifier_evidence_payload(payload)
         details = _trajectory_details(trial_dir, field_limit)
         instruction = details["instruction"] or _task_instruction(tasks_dir, str(payload.get("task_name")), field_limit)
         trajectory = _trajectory_reference(
@@ -655,6 +729,20 @@ def collect_cases(
             trajectory=trajectory,
         )
         native = _read_json(trial_dir / "result.json") if result_path.name == "evolve-replay.json" else payload
+        timing = {
+            name: _duration_seconds(native.get(name))
+            for name in ("environment_setup", "agent_setup", "agent_execution", "verifier")
+        }
+        evidence_timing = verifier_evidence.get("timing")
+        if isinstance(evidence_timing, dict):
+            for name, seconds in evidence_timing.items():
+                if (
+                    name in timing
+                    and timing[name] is None
+                    and isinstance(seconds, (int, float))
+                    and not isinstance(seconds, bool)
+                ):
+                    timing[name] = round(float(seconds), 3)
         task_file = tasks_dir / str(payload["task_name"]).rsplit("/", 1)[-1] / "task.toml" if tasks_dir else None
         evidence["execution"]["time_budget"] = execution_time_budget(
             native.get("config") or {}, task_file, _duration_seconds(native.get("agent_execution")), exception_type
@@ -673,7 +761,8 @@ def collect_cases(
                 "events": details["events"],
                 "trajectory_events": details["trajectory_events"],
                 "raw_agent_output": details["raw_agent_output"],
-                "verifier_output": _verifier_output(trial_dir, field_limit),
+                "verifier_output": _verifier_output(trial_dir, field_limit, verifier_evidence),
+                "verifier_evidence": verifier_evidence,
                 "verifier_rewards": {
                     str(key): (_clip(value, field_limit) if isinstance(value, str) else value)
                     for key, value in verifier_rewards.items()
@@ -689,10 +778,7 @@ def collect_cases(
                     "output_tokens": agent_result.get("n_output_tokens"),
                     "cost_usd": agent_result.get("cost_usd"),
                 },
-                "timing_s": {
-                    name: _duration_seconds(native.get(name))
-                    for name in ("environment_setup", "agent_setup", "agent_execution", "verifier")
-                },
+                "timing_s": timing,
                 "artifact_inventory": _artifact_inventory(trial_dir),
                 "result_path": str(result_path),
             }

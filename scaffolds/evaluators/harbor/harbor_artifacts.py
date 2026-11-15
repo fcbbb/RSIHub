@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 from collections.abc import Mapping
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree
 
 SAFE_ARTIFACTS = (
     "agent/mini-swe-agent.trajectory.json",
@@ -33,6 +36,18 @@ _VERIFIER_UV_REQUEST_ERROR = "Caused by: Request failed"
 _VERIFIER_CURL_SERVER_ERROR = re.compile(r"curl: \(\d+\) The requested URL returned error: 5\d\d\b")
 _SAFE_ERROR_CODE = re.compile(r"[a-z0-9_]+")
 _SENSITIVE_ENV_NAME = re.compile(r"(?i)(?:proxy|api[_-]?key|access[_-]?token|token|secret|password|authorization|auth)")
+
+# Canonical, verifier-independent evidence carried across the certified boundary.
+# The shape is stable for every benchmark; format-specific parsers only map into it.
+VERIFIER_EVIDENCE_SCHEMA = "verifier-evidence-v1"
+_EVIDENCE_MAX_REPORT_FILES = 64
+_EVIDENCE_MAX_REPORT_BYTES = 4_000_000
+_EVIDENCE_MAX_TESTS = 2_000
+_EVIDENCE_MAX_FAILURES = 50
+_EVIDENCE_MAX_MESSAGE = 1_000
+_EVIDENCE_MAX_REWARD_FIELDS = 64
+_EVIDENCE_TIMING_PHASES = ("environment_setup", "agent_setup", "agent_execution", "verifier")
+_STATUS_RANK = {"passed": 0, "skipped": 1, "pending": 2, "other": 3, "error": 4, "failed": 5}
 
 
 def _redact_environment_values(text: str, environment: Mapping[str, str] | None = None) -> str:
@@ -98,15 +113,11 @@ def _write_replay_envelopes(jobs_dir: Path, *, reward_schema: str = "scalar") ->
         task_name, trial_name = result.get("task_name"), result.get("trial_name")
         if not isinstance(task_name, str) or not isinstance(trial_name, str):
             continue
-        envelope: dict[str, Any] = {"schema_version": 1, "task_name": task_name, "trial_name": trial_name}
-        if reward_schema == "reviewbench":
-            reviewbench_reward = _reviewbench_reward(result)
-            if reviewbench_reward is not None:
-                envelope["verifier_result"] = {"rewards": reviewbench_reward}
-        else:
-            reward = _reward(result)
-            if reward is not None:
-                envelope["verifier_result"] = {"rewards": {"reward": reward}}
+        envelope: dict[str, Any] = {"schema_version": 2, "task_name": task_name, "trial_name": trial_name}
+        rewards = _project_rewards(result, reward_schema)
+        if rewards:
+            envelope["verifier_result"] = {"rewards": rewards}
+        envelope["verifier_evidence"] = _verifier_evidence(result_path.parent, result, rewards)
         exception = result.get("exception_info")
         if isinstance(exception, dict):
             safe_exception = {
@@ -126,8 +137,493 @@ def _write_replay_envelopes(jobs_dir: Path, *, reward_schema: str = "scalar") ->
         (result_path.parent / "evolve-replay.json").write_text(json.dumps(envelope, sort_keys=True) + "\n")
 
 
+def _project_rewards(result: dict[str, Any], reward_schema: str) -> dict[str, Any]:
+    """Return every safe scalar reward field, not just the aggregate reward.
+
+    Benchmarks describe their score with different field names. Carrying all
+    scalar fields through keeps the aggregate reward for scoring while giving
+    downstream analysis the benchmark's own breakdown (for example f2p/p2p).
+    """
+    verifier_result = result.get("verifier_result")
+    rewards = verifier_result.get("rewards") if isinstance(verifier_result, dict) else None
+    if not isinstance(rewards, dict):
+        return {}
+    if reward_schema == "reviewbench" and _reviewbench_overall(rewards) is None:
+        return {}
+    projected: dict[str, Any] = {}
+    for key, value in list(rewards.items())[:_EVIDENCE_MAX_REWARD_FIELDS]:
+        safe_key = _safe_label(str(key), limit=120)
+        if safe_key is None:
+            continue
+        if isinstance(value, bool):
+            projected[safe_key] = value
+        elif isinstance(value, (int, float)) and math.isfinite(float(value)):
+            projected[safe_key] = value
+    return projected
+
+
+def _safe_text(value: object, limit: int) -> str:
+    if not isinstance(value, str):
+        return ""
+    return _redact_environment_values(value.strip())[:limit]
+
+
+def _split_category(name: str) -> tuple[str | None, str]:
+    match = re.match(r"^\[([A-Za-z0-9_.:-]{1,40})\]\s+(.*)$", name)
+    if match is None:
+        return None, name
+    category, rest = match.group(1), match.group(2).strip()
+    return (category, rest) if rest else (None, name)
+
+
+def _read_report_json(path: Path) -> dict[str, Any] | None:
+    try:
+        with path.open("rb") as handle:
+            payload = handle.read(_EVIDENCE_MAX_REPORT_BYTES)
+    except OSError:
+        return None
+    try:
+        document = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return document if isinstance(document, dict) else None
+
+
+def _read_report_text(path: Path) -> str:
+    try:
+        with path.open("rb") as handle:
+            return handle.read(_EVIDENCE_MAX_REPORT_BYTES).decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _looks_like_ctrf(payload: dict[str, Any]) -> bool:
+    if payload.get("reportFormat") == "CTRF":
+        return True
+    results = payload.get("results")
+    return isinstance(results, dict) and ("tests" in results or "summary" in results)
+
+
+def _ctrf_records(payload: dict[str, Any]) -> tuple[dict[str, int], list[dict[str, Any]]]:
+    results = payload.get("results")
+    if not isinstance(results, dict):
+        return {}, []
+    summary = results.get("summary")
+    tests = results.get("tests")
+    if not isinstance(tests, list):
+        counts: dict[str, int] = {}
+        if isinstance(summary, dict):
+            mapping = {
+                "tests": "total",
+                "passed": "passed",
+                "failed": "failed",
+                "skipped": "skipped",
+                "pending": "pending",
+                "other": "other",
+            }
+            for source, target in mapping.items():
+                number = _safe_number(summary.get(source))
+                if number is not None:
+                    counts[target] = int(number)
+        return counts, []
+    records: list[dict[str, Any]] = []
+    for test in tests[:_EVIDENCE_MAX_TESTS]:
+        if not isinstance(test, dict):
+            continue
+        name = _safe_text(test.get("name"), 240)
+        if not name:
+            continue
+        category, name = _split_category(name)
+        status = str(test.get("status") or "other").strip().lower()
+        if status not in _STATUS_RANK:
+            status = "other"
+        message = _safe_text(test.get("message") or test.get("trace") or "", _EVIDENCE_MAX_MESSAGE)
+        records.append({"id": name, "category": category, "status": status, "message": message})
+    return {}, records
+
+
+def _junit_records(text: str) -> list[dict[str, Any]]:
+    try:
+        root = ElementTree.fromstring(text)
+    except (ElementTree.ParseError, ValueError):
+        return []
+    records: list[dict[str, Any]] = []
+    for case in root.iter("testcase"):
+        name = _safe_text(case.get("name") or "", 240) or "unknown"
+        classname = _safe_text(case.get("classname") or "", 120) or None
+        failure = case.find("failure")
+        error = case.find("error")
+        skipped = case.find("skipped")
+        if failure is not None:
+            status, node = "failed", failure
+        elif error is not None:
+            status, node = "error", error
+        elif skipped is not None:
+            status, node = "skipped", None
+        else:
+            status, node = "passed", None
+        message = _safe_text(
+            (node.get("message") or node.text or "") if node is not None else "", _EVIDENCE_MAX_MESSAGE
+        )
+        records.append({"id": name, "category": classname, "status": status, "message": message})
+    return records
+
+
+def _tap_records(text: str) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    pattern = re.compile(r"^(not ok|ok)\s+\d+\s*(?:-\s*)?(.+?)\s*$")
+    for line in text.splitlines():
+        match = pattern.match(line)
+        if match is None:
+            continue
+        body = _safe_text(match.group(2), 240)
+        name = _safe_text(re.split(r"\s+#\s+", body, maxsplit=1)[0], 240)
+        if not name:
+            continue
+        status = "failed" if match.group(1) == "not ok" else "passed"
+        if re.search(r"(?i)#\s*skip", body):
+            status = "skipped"
+        records.append({"id": name, "category": None, "status": status, "message": ""})
+    return records
+
+
+def _merge_records(target: dict[tuple[str, str], dict[str, Any]], records: list[dict[str, Any]]) -> None:
+    for record in records:
+        key = (str(record.get("category") or ""), str(record.get("id") or ""))
+        current = target.get(key)
+        if current is None or _STATUS_RANK.get(str(record.get("status")), 3) > _STATUS_RANK.get(
+            str(current.get("status")), 3
+        ):
+            target[key] = record
+
+
+def _counts_from_records(records: list[dict[str, Any]]) -> dict[str, int]:
+    total = len(records)
+    passed = sum(record["status"] == "passed" for record in records)
+    skipped = sum(record["status"] in {"skipped", "pending"} for record in records)
+    counts = {"total": total, "passed": passed, "failed": total - passed - skipped}
+    if skipped:
+        counts["skipped"] = skipped
+    return counts
+
+
+def _failure_records(records: dict[tuple[str, str], dict[str, Any]]) -> list[dict[str, Any]]:
+    failures = [record for record in records.values() if record["status"] not in {"passed", "skipped", "pending"}]
+    failures.sort(
+        key=lambda record: (-_STATUS_RANK.get(str(record["status"]), 3), record["category"] or "", record["id"])
+    )
+    return failures[:_EVIDENCE_MAX_FAILURES]
+
+
+def _report_files(verifier: Path) -> list[Path]:
+    """Return report files, primary ones (directly under verifier/) first."""
+    paths = [
+        path
+        for path in sorted(verifier.rglob("*"))
+        if path.is_file() and path.suffix.lower() in {".json", ".xml", ".tap"}
+    ]
+    paths.sort(key=lambda path: (len(path.relative_to(verifier).parts) > 1, path.name != "ctrf.json", path.as_posix()))
+    return paths[:_EVIDENCE_MAX_REPORT_FILES]
+
+
+def _parse_report_file(path: Path) -> tuple[dict[str, int], list[dict[str, Any]]]:
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        payload = _read_report_json(path)
+        if payload is None or not _looks_like_ctrf(payload):
+            return {}, []
+        return _ctrf_records(payload)
+    if suffix == ".xml":
+        return {}, _junit_records(_read_report_text(path))
+    return {}, _tap_records(_read_report_text(path))
+
+
+def _read_json_document(path: Path) -> object:
+    try:
+        with path.open("rb") as handle:
+            payload = handle.read(_EVIDENCE_MAX_REPORT_BYTES)
+    except OSError:
+        return None
+    try:
+        return json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+
+
+def _bounded_failures(failures: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    failures.sort(
+        key=lambda record: (
+            -_STATUS_RANK.get(str(record.get("status")), 3),
+            str(record.get("category") or ""),
+            str(record.get("id") or ""),
+        )
+    )
+    return failures[:_EVIDENCE_MAX_FAILURES]
+
+
+def _sweatlas_evidence(verifier: Path) -> tuple[dict[str, int], list[dict[str, Any]]]:
+    """Map SWE-Atlas ``evaluation_results.json`` onto the canonical evidence shape.
+
+    ``counts`` covers every check the verifier reports (baseline tests, gates,
+    rubrics, mutation no-ops), not just test cases, so it stays consistent with
+    the ``failures`` list. The mutation run is *expected* to fail the relevant
+    tests, so only mutation no-ops are failures — a plain FAILED status there is
+    correct behaviour.
+    """
+    payload = _read_report_json(verifier / "evaluation_results.json")
+    if payload is None:
+        return {}, []
+    mutation = payload.get("mutation_testing")
+    mutation = mutation if isinstance(mutation, dict) else {}
+    failures: list[dict[str, Any]] = []
+    total = passed = 0
+    baseline = mutation.get("baseline")
+    tests = baseline.get("tests") if isinstance(baseline, dict) else None
+    baseline_total = baseline_passed = 0
+    if isinstance(tests, list):
+        for test in tests[:_EVIDENCE_MAX_TESTS]:
+            if not isinstance(test, dict):
+                continue
+            name = _safe_text(test.get("name"), 240)
+            if not name:
+                continue
+            baseline_total += 1
+            status = str(test.get("status") or "").strip()
+            if status.upper() == "PASSED":
+                baseline_passed += 1
+            else:
+                failures.append(
+                    {"id": name, "category": "baseline", "status": "failed", "message": _safe_text(status, 120)}
+                )
+    if baseline_total == 0:
+        total_number = _safe_number(mutation.get("baseline_relevant_total_count"))
+        passed_number = _safe_number(mutation.get("baseline_relevant_passed_count"))
+        if total_number is not None and passed_number is not None:
+            baseline_total, baseline_passed = int(total_number), int(passed_number)
+    total += baseline_total
+    passed += baseline_passed
+    not_failed = mutation.get("mutation_not_failed_relevant_tests")
+    if isinstance(not_failed, list):
+        for item in not_failed[:_EVIDENCE_MAX_TESTS]:
+            name = _safe_text(item, 240)
+            if not name:
+                continue
+            total += 1
+            failures.append(
+                {
+                    "id": name,
+                    "category": "mutation",
+                    "status": "failed",
+                    "message": "relevant test did not fail after mutation",
+                }
+            )
+    for gate in ("overall", "manifest", "mutation", "rubrics"):
+        value = payload.get(f"{gate}_pass")
+        if value is True:
+            total += 1
+            passed += 1
+        elif value is False:
+            total += 1
+            failures.append({"id": gate, "category": "gate", "status": "failed", "message": f"{gate} gate failed"})
+    rubrics = payload.get("rubrics")
+    rubric_scores = rubrics.get("rubric_scores") if isinstance(rubrics, dict) else None
+    if isinstance(rubric_scores, list):
+        for rubric in rubric_scores[:_EVIDENCE_MAX_TESTS]:
+            if not isinstance(rubric, dict) or not isinstance(rubric.get("passes"), bool):
+                continue
+            total += 1
+            if rubric["passes"]:
+                passed += 1
+                continue
+            title = _safe_text(rubric.get("title"), 240) or _safe_text(rubric.get("id"), 80) or "rubric"
+            score = rubric.get("score")
+            justification = _safe_text(score.get("justification"), 400) if isinstance(score, dict) else ""
+            message = f"{title}: {justification}" if justification else title
+            failures.append(
+                {
+                    "id": title,
+                    "category": "rubric",
+                    "status": "failed",
+                    "message": message[:_EVIDENCE_MAX_MESSAGE],
+                }
+            )
+    counts = {"total": total, "passed": passed, "failed": max(0, total - passed)} if total else {}
+    return counts, _bounded_failures(failures)
+
+
+def _reviewbench_evidence(verifier: Path) -> tuple[dict[str, int], list[dict[str, Any]]]:
+    """Map ReviewBench ``scores.details.json`` candidate findings onto the shape.
+
+    ``novel_tp`` (an unmatched candidate the judge classified as a true
+    positive) *raises* the augmented F1 in ``scorer.ts``, so it counts as
+    passed alongside ``matched_tp``; only the false-positive statuses are
+    failures.
+    """
+    document = _read_json_document(verifier / "scores.details.json")
+    if not isinstance(document, list):
+        return {}, []
+    total = passed = 0
+    failures: list[dict[str, Any]] = []
+    for pull_request in document[:64]:
+        findings = pull_request.get("candidate_findings") if isinstance(pull_request, dict) else None
+        if not isinstance(findings, list):
+            continue
+        for finding in findings[:_EVIDENCE_MAX_TESTS]:
+            if not isinstance(finding, dict):
+                continue
+            status = str(finding.get("status") or "").strip().lower()
+            if not status:
+                continue
+            total += 1
+            if status in {"matched_tp", "novel_tp"}:
+                passed += 1
+                continue
+            location = _safe_text(finding.get("file"), 240)
+            start = _safe_number(finding.get("start_line"))
+            end = _safe_number(finding.get("end_line"))
+            identifier = location or f"finding-{total}"
+            if location and start is not None:
+                suffix = f":{int(start)}"
+                if end is not None and int(end) != int(start):
+                    suffix += f"-{int(end)}"
+                identifier = f"{location}{suffix}"
+            failures.append(
+                {
+                    "id": identifier,
+                    "category": _safe_text(finding.get("result_category"), 40) or None,
+                    "status": "failed",
+                    "message": _safe_text(finding.get("message"), _EVIDENCE_MAX_MESSAGE),
+                }
+            )
+    counts = {"total": total, "passed": passed, "failed": total - passed} if total else {}
+    return counts, _bounded_failures(failures)
+
+
+_STRUCTURED_EVIDENCE_ADAPTERS = (
+    ("evaluation_results.json", _sweatlas_evidence),
+    ("scores.details.json", _reviewbench_evidence),
+)
+
+
+def _report_evidence(trial_dir: Path) -> tuple[dict[str, int], list[dict[str, Any]]]:
+    """Parse standard test reports (CTRF, JUnit XML, TAP) into one test view.
+
+    Reports directly under ``verifier/`` describe the scored test set; files in
+    subdirectories are typically broader baseline/post-change dumps. Prefer the
+    primary group so counts stay aligned with the reward semantics, and fall back
+    to nested reports only when the primary group has nothing to say.
+
+    Within a group, reports merge by test identity with the worst status winning,
+    which handles frameworks that split baseline and new-state reports without
+    double-counting shared tests.
+
+    Benchmarks that predate standard report formats may instead emit a
+    verifier-owned structured document; the adapters below map those documents
+    into the same shape. Standard reports always take precedence.
+    """
+    verifier = trial_dir / "verifier"
+    if not verifier.is_dir():
+        return {}, []
+    fallback_counts: dict[str, int] = {}
+    for primary in (True, False):
+        merged: dict[tuple[str, str], dict[str, Any]] = {}
+        for path in _report_files(verifier):
+            if (len(path.relative_to(verifier).parts) <= 1) != primary:
+                continue
+            counts, records = _parse_report_file(path)
+            if counts and not fallback_counts:
+                fallback_counts = counts
+            _merge_records(merged, records)
+        if merged:
+            return _counts_from_records(list(merged.values())), _failure_records(merged)
+    for name, adapter in _STRUCTURED_EVIDENCE_ADAPTERS:
+        if (verifier / name).is_file():
+            counts, failures = adapter(verifier)
+            if counts or failures:
+                return counts, failures
+    return fallback_counts, []
+
+
+def _duration_seconds(value: object) -> float | None:
+    if not isinstance(value, dict):
+        return None
+    for key in ("duration_s", "duration", "elapsed_s", "elapsed"):
+        number = _safe_number(value.get(key))
+        if number is not None:
+            return round(float(number), 3)
+    try:
+        start = datetime.fromisoformat(str(value["started_at"]).replace("Z", "+00:00"))
+        finish = datetime.fromisoformat(str(value["finished_at"]).replace("Z", "+00:00"))
+    except (KeyError, TypeError, ValueError):
+        return None
+    return round((finish - start).total_seconds(), 3)
+
+
+def _trial_timing(result: dict[str, Any]) -> dict[str, float]:
+    timing: dict[str, float] = {}
+    for phase in _EVIDENCE_TIMING_PHASES:
+        seconds = _duration_seconds(result.get(phase))
+        if seconds is not None:
+            timing[phase] = seconds
+    return timing
+
+
+def _evidence_status(result: dict[str, Any], rewards: dict[str, Any]) -> str:
+    """Classify the verifier run itself, independent of the evidence shape.
+
+    Benchmark schemas that score without a ``reward`` key (ReviewBench encodes
+    its score as validated counts) still count as scored.
+    """
+    reward = rewards.get("reward")
+    if isinstance(reward, (int, float)) and not isinstance(reward, bool) and math.isfinite(float(reward)):
+        return "scored"
+    if _reviewbench_overall(rewards) is not None:
+        return "scored"
+    exception = result.get("exception_info")
+    if isinstance(exception, dict):
+        text = f"{exception.get('exception_type') or ''} {exception.get('exception_message') or ''}".lower()
+        if "timeout" in text:
+            return "timeout"
+        if exception.get("exception_type"):
+            return "error"
+    return "unscored"
+
+
+def _verifier_evidence(trial_dir: Path, result: dict[str, Any], rewards: dict[str, Any]) -> dict[str, Any]:
+    counts, failures = _report_evidence(trial_dir)
+    timing = _trial_timing(result)
+    missing: list[str] = []
+    if not rewards:
+        missing.append("rewards")
+    if not counts and not failures:
+        missing.append("detail")
+    if not timing:
+        missing.append("timing")
+    if not missing:
+        completeness = "full"
+    elif len(missing) == 3:
+        completeness = "missing"
+    else:
+        completeness = "partial"
+    return {
+        "schema_version": VERIFIER_EVIDENCE_SCHEMA,
+        "status": _evidence_status(result, rewards),
+        "counts": counts,
+        "failures": failures,
+        "timing": timing,
+        "completeness": completeness,
+        "missing": missing,
+    }
+
+
 def _safe_number(value: object) -> int | float | None:
-    return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    # ``json.loads`` accepts ``Infinity``/``NaN`` by default; downstream
+    # ``int(value)`` would raise on either, so drop them here.
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
 
 
 def _safe_label(value: object, limit: int = 80) -> str | None:

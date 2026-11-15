@@ -620,3 +620,55 @@ def test_replay_rejects_jobs_path_without_trial_results(tmp_path: Path, monkeypa
 
     with pytest.raises(SystemExit, match="produced no trial results"):
         module.EvaluationReplayRollout().rollout(ctx.checkout, ctx)
+
+
+def test_replay_renders_canonical_evidence_when_no_verifier_files_are_certified(tmp_path: Path) -> None:
+    module = _replay_module()
+    checkout = tmp_path / "checkout"
+    _vendor_harbor_evidence(checkout)
+    jobs = tmp_path / "jobs"
+    trial = jobs / "trial-a"
+    trial.mkdir(parents=True)
+    (trial / "evolve-replay.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "trial_name": "trial-a",
+                "task_name": "task-a",
+                "verifier_result": {
+                    "rewards": {"reward": 0.0, "f2p_passed": 19, "f2p_total": 20, "p2p_passed": 3, "p2p_total": 3}
+                },
+                "verifier_evidence": {
+                    "schema_version": "verifier-evidence-v1",
+                    "status": "scored",
+                    "counts": {"total": 23, "passed": 22, "failed": 1},
+                    "failures": [
+                        {
+                            "id": "tests/test_api.py::test_new_behavior",
+                            "category": "f2p",
+                            "status": "failed",
+                            "message": "assert 1 == 2",
+                        }
+                    ],
+                    "timing": {"environment_setup": 1.25, "agent_execution": 10.0, "verifier": 2.5},
+                    "completeness": "full",
+                    "missing": [],
+                },
+            }
+        )
+    )
+
+    cases = module._load_collect_cases(checkout)(jobs)
+
+    (case,) = cases
+    assert case["verifier_rewards"]["f2p_passed"] == 19
+    assert "[verifier-evidence]" in case["verifier_output"]
+    assert "status: scored" in case["verifier_output"]
+    assert "tests/test_api.py::test_new_behavior" in case["verifier_output"]
+    assert case["verifier_evidence"]["completeness"] == "full"
+    assert case["timing_s"] == {
+        "environment_setup": 1.25,
+        "agent_setup": None,
+        "agent_execution": 10.0,
+        "verifier": 2.5,
+    }

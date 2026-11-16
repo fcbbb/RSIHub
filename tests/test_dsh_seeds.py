@@ -147,8 +147,7 @@ def test_ensure_node_stages_node_when_the_container_cannot_run_dsh(tmp_path: Pat
         (str(runtime_dir / "node"), "/opt/evolve-dsh/node-staged"),
     ]
     assert environment.root_commands == [
-        "install -m 755 /opt/evolve-dsh/node-staged /usr/local/bin/node && "
-        "rm -f /opt/evolve-dsh/node-staged"
+        "install -m 755 /opt/evolve-dsh/node-staged /usr/local/bin/node && rm -f /opt/evolve-dsh/node-staged"
     ]
 
 
@@ -166,9 +165,7 @@ def test_stage_rollout_keeps_candidate_out_of_logs_and_tmp(tmp_path: Path) -> No
     candidate = tmp_path / "candidate"
     (candidate / "plugins").mkdir(parents=True)
     (candidate / "profile.cordis.yml").write_text(
-        "- insert:\n"
-        "    - id: plugin-seed-probe\n"
-        "      name: './plugins/seed-probe.mjs'\n"
+        "- insert:\n    - id: plugin-seed-probe\n      name: './plugins/seed-probe.mjs'\n"
     )
     (candidate / "plugins" / "seed-probe.mjs").write_text("export default {};\n")
     cordis = tmp_path / "rollout.base.cordis.yml"

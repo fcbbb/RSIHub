@@ -524,9 +524,7 @@ done
         """
         with tempfile.TemporaryDirectory(prefix="evolve-dsh-stage-") as host_staging:
             host = Path(host_staging)
-            archive = await asyncio.to_thread(
-                self._tar_candidate, candidate, host / "candidate.tar.gz"
-            )
+            archive = await asyncio.to_thread(self._tar_candidate, candidate, host / "candidate.tar.gz")
             overlay = materialize_candidate_overlay(
                 candidate,
                 host,
@@ -537,9 +535,7 @@ done
                 environment,
                 f"rm -rf {CONTAINER_STAGING_ROOT} && mkdir -p {CANDIDATE_IN_CONTAINER}",
             )
-            await environment.upload_file(
-                str(archive), f"{CONTAINER_STAGING_ROOT}/candidate.tar.gz"
-            )
+            await environment.upload_file(str(archive), f"{CONTAINER_STAGING_ROOT}/candidate.tar.gz")
             await self.exec_as_root(
                 environment,
                 f"tar -xzf {CONTAINER_STAGING_ROOT}/candidate.tar.gz -C {CANDIDATE_IN_CONTAINER} && "

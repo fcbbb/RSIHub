@@ -10,7 +10,7 @@ ReviewBench.
 
 > For pipeline iteration on a five-PR cohort instead of all 219, use
 > `ahe_dsh_reviewbench_fast` (see
-> [its README](../../recipes/ahe_dsh_reviewbench_fast/README.md)); it shares
+> [its README](https://github.com/simple-agent-lab/RSIHub/blob/main/recipes/ahe_dsh_reviewbench_fast/README.md)); it shares
 > this evaluator and only narrows the dataset and generation count.
 
 ## Scoring contract

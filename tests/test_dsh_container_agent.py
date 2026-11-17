@@ -83,8 +83,8 @@ def test_mutate_run_maps_env_and_writes_trajectory(tmp_path: Path) -> None:
     assert call["env"]["DSH_PERMISSION_MODE"] == "danger-full-access"
     assert call["timeout_sec"] == 3300
     assert call["env"]["DSH_MODEL"] == "gpt-5.4-2026-03-05"
-    assert call["env"]["DEEPSEEK_API_KEY"] == "test-key"
-    assert call["env"]["DEEPSEEK_BASE_URL"] == "https://example.invalid/v1"
+    assert call["env"]["OPENAI_API_KEY"] == "test-key"
+    assert call["env"]["OPENAI_BASE_URL"] == "https://example.invalid/v1"
     assert call["env"]["HTTPS_PROXY"] == "http://proxy.invalid"
     assert call["env"]["DSH_HOME"] == "/tmp/evolve-dsh-home"
 

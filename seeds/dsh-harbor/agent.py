@@ -589,9 +589,7 @@ done
             "DSH_EVENTS_FILE": f"{CONTAINER_LOGS}/dsh-events.jsonl",
             "DSH_RUN_TIMEOUT_SEC": str(max(1, timeout - 5)),
             "OPENAI_API_KEY": self._env("OPENAI_API_KEY", "") or "",
-            "OPENAI_BASE_URL": self._env("OPENAI_BASE_URL", "")
-            or self._env("OPENAI_API_BASE", "")
-            or "",
+            "OPENAI_BASE_URL": self._env("OPENAI_BASE_URL", "") or self._env("OPENAI_API_BASE", "") or "",
             "DEEPSEEK_API_KEY": self._env("OPENAI_API_KEY", "") or "",
             "DEEPSEEK_BASE_URL": self._env("OPENAI_BASE_URL", "") or "",
         }

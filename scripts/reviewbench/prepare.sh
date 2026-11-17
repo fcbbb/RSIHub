@@ -9,6 +9,7 @@ set -euo pipefail
 ROOT="${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 WORKSPACE="${WORKSPACE:?WORKSPACE must point at the initialized workspace}"
 ENV_FILE="${ENV_FILE:-$ROOT/.env}"
+KEY_FILE="${AHE_DSH_KEY_FILE:-/Leiyuanyuan/tools/secrets/ahe_dsh_api_key}"
 
 fail() { printf 'prepare: %s\n' "$*" >&2; exit 1; }
 
@@ -18,20 +19,21 @@ if [ -z "${OPENAI_API_KEY:-}" ] && [ -f "$ENV_FILE" ]; then
   . "$ENV_FILE"
   set +a
 fi
+if [ -z "${OPENAI_API_KEY:-}" ] && [ -f "$KEY_FILE" ]; then
+  OPENAI_API_KEY=$(cat "$KEY_FILE")
+fi
 
 [ -n "${OPENAI_API_KEY:-}" ] ||
   fail "set OPENAI_API_KEY (or put it in $ENV_FILE); never commit it"
-OPENAI_BASE_URL="${OPENAI_BASE_URL:-${OPENAI_API_BASE:-}}"
+OPENAI_BASE_URL="${OPENAI_BASE_URL:-${OPENAI_API_BASE:-https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}}"
 [ -n "$OPENAI_BASE_URL" ] ||
-  fail "set OPENAI_BASE_URL (dsh needs an Anthropic Messages endpoint, e.g. .../apps/anthropic)"
-# dsh appends /v1/messages, so /compatible-mode/v1 answers 400 INVALID_REQUEST.
-# The judge uses /compatible-mode/v1 independently through models.json.
+  fail "set OPENAI_BASE_URL to the OpenAI-compatible API endpoint used by DSH"
 case "$OPENAI_BASE_URL" in
-  */compatible-mode/v1)
-    OPENAI_BASE_URL="${OPENAI_BASE_URL%/compatible-mode/v1}/apps/anthropic"
-    printf 'prepare: mapped OPENAI_BASE_URL to %s\n' "$OPENAI_BASE_URL" >&2
+  */apps/anthropic)
+    fail "this DSH profile uses OpenAI-compatible completions; set OPENAI_BASE_URL to .../compatible-mode/v1, not /apps/anthropic"
     ;;
 esac
+OPENAI_API_BASE="${OPENAI_API_BASE:-$OPENAI_BASE_URL}"
 RB_HARBOR_OPENAI_API_KEY="${RB_HARBOR_OPENAI_API_KEY:-$OPENAI_API_KEY}"
 
 if [ -z "${DSH_RUNTIME_IMAGE:-}" ]; then
@@ -75,8 +77,10 @@ PY
 fi
 
 if [ "${REFRESH_RUNTIME_PIN:-1}" = 1 ]; then
-  # OPENAI_BASE_URL may have been mapped above; refresh the frozen endpoint pin
-  # so preflight accepts the same environment.
+  # Refresh the frozen endpoint pin so preflight accepts the same environment.
+  # OPENAI_BASE_URL may have been remapped above for DSH's Anthropic endpoint;
+  # export it so resolve_runtime pins the endpoint that preflight will inspect.
+  export OPENAI_BASE_URL OPENAI_API_BASE
   uv run --frozen python - "$WORKSPACE" <<'PY'
 import json
 import os
@@ -111,6 +115,8 @@ fi
 
 # stdout is the hook protocol: the runner exports each KEY=VALUE line.
 printf 'OPENAI_BASE_URL=%s\n' "$OPENAI_BASE_URL"
+printf 'OPENAI_API_BASE=%s\n' "$OPENAI_API_BASE"
+printf 'OPENAI_API_KEY=%s\n' "$OPENAI_API_KEY"
 printf 'RB_HARBOR_OPENAI_API_KEY=%s\n' "$RB_HARBOR_OPENAI_API_KEY"
 printf 'DSH_RUNTIME_IMAGE=%s\n' "$DSH_RUNTIME_IMAGE"
 [ -z "${DOCKER_CONFIG:-}" ] || printf 'DOCKER_CONFIG=%s\n' "$DOCKER_CONFIG"

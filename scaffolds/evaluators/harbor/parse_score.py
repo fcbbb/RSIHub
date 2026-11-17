@@ -7,7 +7,13 @@ import sys
 from glob import escape
 from pathlib import Path
 
-from harbor_artifacts import FINAL_TRIAL_STATUSES, _load_task_trials, write_harbor_artifacts
+from harbor_artifacts import (
+    FINAL_TRIAL_STATUSES,
+    _load_task_trials,
+    is_official_reviewbench_task,
+    task_source,
+    write_harbor_artifacts,
+)
 
 
 def _load_eval_env(path: Path) -> dict[str, str]:
@@ -113,6 +119,26 @@ def _missing_tasks(argv: list[str]) -> int:
     return 0
 
 
+def _multibench_scores(roots: list[Path]) -> dict[str, float]:
+    grouped: dict[str, list[float]] = {"deep_swe": [], "reviewbench": [], "swe_atlas": []}
+    official_reviewbench: list[float] = []
+    for trial in _load_task_trials(roots, reward_schema="multibench"):
+        source = task_source(str(trial["task_name"]))
+        if source not in grouped:
+            raise ValueError(f"task {trial['task_name']!r} has no recognized benchmark source")
+        if trial["reward"] is not None:
+            grouped[source].append(float(trial["reward"]))
+            if source == "reviewbench" and is_official_reviewbench_task(str(trial["task_name"])):
+                official_reviewbench.append(float(trial["reward"]))
+    missing = [source for source, values in grouped.items() if not values]
+    if missing:
+        raise ValueError("multibench score is missing completed tasks for: " + ", ".join(missing))
+    scores = {source: sum(values) / len(values) for source, values in grouped.items()}
+    if official_reviewbench:
+        scores["reviewbench_official_25"] = sum(official_reviewbench) / len(official_reviewbench)
+    return scores
+
+
 def main(argv: list[str]) -> int:
     if len(argv) > 1 and argv[1] == "--missing-tasks":
         return _missing_tasks(argv)
@@ -149,7 +175,11 @@ def main(argv: list[str]) -> int:
         )
         return 3
 
+    score_components = None
     score = sum(rewards) / completed_trials
+    if reward_schema == "multibench" and completed_trials == expected_trials:
+        score_components = _multibench_scores(jobs_roots)
+        score = sum(score_components[source] for source in ("deep_swe", "reviewbench", "swe_atlas")) / 3
     metrics = {
         "completed_trials": completed_trials,
         "expected_trials": expected_trials,
@@ -157,6 +187,8 @@ def main(argv: list[str]) -> int:
         "pass_rate": score,
         "harbor_rc": harbor_rc,
     }
+    if score_components is not None:
+        metrics["score_components"] = score_components
     if completed_trials < expected_trials:
         _write_outputs(run_dir, status="infra_failed", metrics=metrics)
         return 3

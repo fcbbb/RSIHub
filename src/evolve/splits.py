@@ -10,6 +10,7 @@ import re
 import shutil
 import stat
 import sys
+import tomllib
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from glob import escape
@@ -229,7 +230,17 @@ def build_manifest(
     resolved = _resolve_dataset(dataset, base_dir)
     identity = dataset_content_identity(dataset, base_dir=base_dir, client=registry_client)
     names = list(identity.members)
-    assignments = _assign(names, ratios, seed)
+    group_by = split.get("group_by")
+    group_assignments: dict[str, str] | None = None
+    group_members: dict[str, list[str]] | None = None
+    if group_by is None:
+        assignments = _assign(names, ratios, seed)
+    elif group_by == "source_repository":
+        if resolved is None:
+            raise ValueError("evaluator.split.group_by=source_repository requires a local Harbor dataset")
+        assignments, group_assignments, group_members = _assign_source_repository(resolved, names, ratios, seed)
+    else:
+        raise ValueError("evaluator.split.group_by must be 'source_repository'")
     empty = [name for name in SPLIT_NAMES if names and ratios[name] > 0 and not assignments[name]]
     if empty:
         raise ValueError(f"evaluator.dataset is too small for non-empty splits: {', '.join(empty)}")
@@ -244,6 +255,10 @@ def build_manifest(
         "gate_tasks_per_round": max(gate_limit, 0),
         "tasks": assignments,
     }
+    if group_by is not None:
+        manifest["group_by"] = group_by
+        manifest["group_assignments"] = group_assignments
+        manifest["group_members"] = group_members
     manifest["dataset_identity"] = {
         "source": identity.source,
         "digest": identity.digest,
@@ -293,6 +308,27 @@ def parse_manifest(text: str, *, source: str = "split manifest") -> dict[str, An
         or any(not _sha256(task_digests.get(member)) for member in members)
     ):
         raise RuntimeError(f"invalid content identity in split manifest: {source}")
+    if "group_by" in payload:
+        group_assignments = payload.get("group_assignments")
+        group_members = payload.get("group_members")
+        if (
+            payload.get("group_by") != "source_repository"
+            or not isinstance(group_assignments, dict)
+            or not isinstance(group_members, dict)
+            or set(group_assignments) != set(group_members)
+            or any(value not in SPLIT_NAMES for value in group_assignments.values())
+            or any(not isinstance(value, list) or not value for value in group_members.values())
+        ):
+            raise RuntimeError(f"invalid repository-group assignments: {source}")
+        observed_group_members: dict[str, str] = {}
+        member_splits = {member: split for split in SPLIT_NAMES for member in tasks[split]}
+        for group, members in group_members.items():
+            for member in members:
+                if not isinstance(member, str) or member in observed_group_members:
+                    raise RuntimeError(f"duplicate or invalid grouped task member: {source}")
+                observed_group_members[member] = str(group_assignments[group])
+        if observed_group_members != member_splits:
+            raise RuntimeError(f"repository groups do not match split task membership: {source}")
     return payload
 
 
@@ -511,6 +547,70 @@ def _assign(names: list[str], ratios: dict[str, float], seed: int) -> dict[str, 
         result[name] = sorted(ordered[offset : offset + counts[name]])
         offset += counts[name]
     return result
+
+
+def _assign_source_repository(
+    dataset: Path, names: list[str], ratios: dict[str, float], seed: int
+) -> tuple[dict[str, list[str]], dict[str, str], dict[str, list[str]]]:
+    """Split each benchmark source by repository, keeping protected test repos sealed."""
+    if ratios["gate"] != 0 or ratios["train"] <= 0 or ratios["sealed"] <= 0:
+        raise ValueError("source_repository splits currently require train and sealed ratios with gate: 0")
+
+    groups: dict[str, dict[str, list[str]]] = {}
+    protected_groups: set[tuple[str, str]] = set()
+    for name in names:
+        task_path = dataset / name / "task.toml"
+        try:
+            payload = tomllib.loads(task_path.read_text())
+        except (OSError, tomllib.TOMLDecodeError) as error:
+            raise ValueError(f"cannot read source/repository metadata for task {name!r}") from error
+        metadata = payload.get("metadata")
+        source = metadata.get("evolve_source") if isinstance(metadata, dict) else None
+        repository = metadata.get("evolve_repository") if isinstance(metadata, dict) else None
+        if not isinstance(source, str) or not source or not isinstance(repository, str) or not repository:
+            raise ValueError(f"task {name!r} must define metadata.evolve_source and metadata.evolve_repository")
+        key = (source, repository)
+        groups.setdefault(source, {}).setdefault(repository, []).append(name)
+        if isinstance(metadata, dict) and metadata.get("evolve_official_test") is True:
+            protected_groups.add(key)
+
+    assignments = {name: [] for name in SPLIT_NAMES}
+    group_assignments: dict[str, str] = {}
+    group_members: dict[str, list[str]] = {}
+    for source in sorted(groups):
+        source_groups = groups[source]
+        protected = {repo for repo in source_groups if (source, repo) in protected_groups}
+        eligible = [repo for repo in source_groups if repo not in protected]
+        total_eligible = sum(len(source_groups[repo]) for repo in eligible)
+        if total_eligible == 0:
+            raise ValueError(f"source {source!r} has no tasks outside protected test repositories")
+        train_target = round(total_eligible * ratios["train"] / (ratios["train"] + ratios["sealed"]))
+        ordered = sorted(eligible, key=lambda repo: _digest(f"{seed}\0{source}\0{repo}"))
+
+        # Exact subset-sum over task counts keeps the realized per-source ratio
+        # as close as possible while never splitting a repository group.
+        reachable: dict[int, tuple[str, ...]] = {0: ()}
+        for repo in ordered:
+            size = len(source_groups[repo])
+            for count, selected in tuple(reachable.items()):
+                candidate = count + size
+                if candidate <= total_eligible and candidate not in reachable:
+                    reachable[candidate] = (*selected, repo)
+        train_count = min(reachable, key=lambda count: (abs(count - train_target), count > train_target, count))
+        train_repositories = set(reachable[train_count])
+
+        for repo, task_names in source_groups.items():
+            split_name = "sealed" if repo in protected else "train" if repo in train_repositories else "sealed"
+            assignments[split_name].extend(task_names)
+            group_key = f"{source}::{repo}"
+            group_assignments[group_key] = split_name
+            group_members[group_key] = sorted(task_names)
+
+    for split_name in assignments:
+        assignments[split_name].sort()
+    if not assignments["train"] or not assignments["sealed"]:
+        raise ValueError("source_repository split produced an empty train or sealed partition")
+    return assignments, dict(sorted(group_assignments.items())), dict(sorted(group_members.items()))
 
 
 def _digest(value: str) -> str:

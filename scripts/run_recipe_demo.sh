@@ -17,7 +17,7 @@ PREPARE_HOOK=${PREPARE_HOOK:-}
 [[ $ENV_FILE == /* ]] || ENV_FILE=$CALLER/$ENV_FILE
 [[ $ASSET_ROOT == /* ]] || ASSET_ROOT=$CALLER/$ASSET_ROOT
 [[ -z $DATASET_PATH || $DATASET_PATH == /* ]] || DATASET_PATH=$CALLER/$DATASET_PATH
-SUPPORTED=" aevolve ahe ahe_codex gepa hill_climb hill_climb_codex hyperagents hyperagents_codex hyperagents_dsh ahe_dsh ahe_dsh_reviewbench hyperagents_tbench_full hyperagents_codex_tbench_full "
+SUPPORTED=" aevolve ahe ahe_codex gepa hill_climb hill_climb_codex hyperagents hyperagents_codex hyperagents_dsh ahe_dsh ahe_dsh_reviewbench ahe_dsh_multibench hyperagents_tbench_full hyperagents_codex_tbench_full "
 [[ $SUPPORTED == *" $RECIPE "* ]] || { echo "unsupported recipe '$RECIPE'; supported recipes:$SUPPORTED" >&2; exit 2; }
 DATASET=${DATASET_PATH:-$ASSET_ROOT/terminal-bench-2-30-v1}
 [[ -n $DATASET_PATH || $RECIPE != *_tbench_full ]] || DATASET=$ASSET_ROOT/raw/terminal-bench

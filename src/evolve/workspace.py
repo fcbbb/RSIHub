@@ -449,15 +449,19 @@ def _validate_evaluator_config(evaluator: dict[str, Any]) -> None:
         raise ValueError("evaluator.agent is required for harbor recipes")
     _evaluator_agent_allowed_hosts(evaluator)
     reward_schema = str(evaluator.get("reward_schema", "scalar"))
-    if reward_schema not in {"scalar", "reviewbench"}:
-        raise ValueError("evaluator.reward_schema must be 'scalar' or 'reviewbench'")
-    if reward_schema == "reviewbench":
+    if reward_schema not in {"scalar", "reviewbench", "multibench"}:
+        raise ValueError("evaluator.reward_schema must be 'scalar', 'reviewbench', or 'multibench'")
+    if reward_schema in {"reviewbench", "multibench"}:
         if engine != "harbor":
-            raise ValueError("evaluator.reward_schema=reviewbench requires the harbor engine")
+            raise ValueError(f"evaluator.reward_schema={reward_schema} requires the harbor engine")
         if evaluator_repetitions(evaluator) != 1:
-            raise ValueError("evaluator.reward_schema=reviewbench requires evaluator.repetitions: 1")
+            raise ValueError(f"evaluator.reward_schema={reward_schema} requires evaluator.repetitions: 1")
         if float(evaluator.get("partial_floor", 0.9)) != 1.0:
-            raise ValueError("evaluator.reward_schema=reviewbench requires evaluator.partial_floor: 1.0")
+            raise ValueError(f"evaluator.reward_schema={reward_schema} requires evaluator.partial_floor: 1.0")
+    if reward_schema == "multibench":
+        split = evaluator.get("split")
+        if not isinstance(split, dict) or split.get("group_by") != "source_repository":
+            raise ValueError("evaluator.reward_schema=multibench requires split.group_by: source_repository")
 
 
 def _validate_target_config(target: dict[str, Any]) -> None:

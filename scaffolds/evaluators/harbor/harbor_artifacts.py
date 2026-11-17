@@ -813,20 +813,30 @@ def _reviewbench_f1(counts: dict[str, int]) -> float | None:
     return 2 * precision * recall / (precision + recall) if precision + recall else 0.0
 
 
+def _uses_reviewbench_metric(result: dict[str, Any], reward_schema: str) -> bool:
+    task_name = result.get("task_name")
+    return reward_schema == "reviewbench" or (
+        reward_schema == "multibench" and isinstance(task_name, str) and task_source(task_name) == "reviewbench"
+    )
+
+
 def _has_scoring_reward(result: dict[str, Any], reward_schema: str) -> bool:
-    if reward_schema == "reviewbench":
+    if _uses_reviewbench_metric(result, reward_schema):
         return _reviewbench_reward(result) is not None
     return (_reward(result) or 0.0) > 0.0
 
 
-def _impute_reviewbench_rewards(trials: list[dict[str, Any]]) -> None:
+def _impute_reviewbench_rewards(trials: list[dict[str, Any]], *, reviewbench_only: bool = False) -> None:
     """Make RSIHub's mean equal ReviewBench's macro augmented F1.
 
     Undefined PRs are replaced by the mean of the defined PRs in the same
-    evaluation.  The identity holds because the denominator (all trials) is
-    unchanged: (sum_defined + undefined * mean) / total == mean.
+    evaluation.  In a combined benchmark, only ReviewBench tasks participate in
+    this imputation; the other source scores keep their native rewards.
     """
-    completed = [trial for trial in trials if trial["status"] == "benchmark_complete"]
+    selected = [
+        trial for trial in trials if not reviewbench_only or task_source(str(trial["task_name"])) == "reviewbench"
+    ]
+    completed = [trial for trial in selected if trial["status"] == "benchmark_complete"]
     defined = [float(trial["reward"]) for trial in completed if trial["reward"] is not None]
     if not defined:
         for trial in completed:
@@ -846,6 +856,18 @@ def _impute_reviewbench_rewards(trials: list[dict[str, Any]]) -> None:
 FINAL_TRIAL_STATUSES = frozenset({"benchmark_complete", "timeout", "candidate_invalid"})
 
 
+_MULTIBENCH_SOURCES = frozenset({"deep_swe", "reviewbench", "swe_atlas"})
+
+
+def task_source(task_name: str) -> str | None:
+    source, separator, _ = task_name.partition("__")
+    return source if separator and source in _MULTIBENCH_SOURCES else None
+
+
+def is_official_reviewbench_task(task_name: str) -> bool:
+    return task_name.startswith("reviewbench__official__")
+
+
 def _load_task_trials(
     jobs_dirs: Path | list[Path] | tuple[Path, ...], *, reward_schema: str = "scalar"
 ) -> list[dict[str, Any]]:
@@ -857,6 +879,8 @@ def _load_task_trials(
         trials = _merge_resumed_trials(trials)
     if reward_schema == "reviewbench":
         _impute_reviewbench_rewards(trials)
+    elif reward_schema == "multibench":
+        _impute_reviewbench_rewards(trials, reviewbench_only=True)
     return sorted(trials, key=lambda trial: (str(trial["task_name"]), str(trial["trial_name"])))
 
 
@@ -1086,7 +1110,7 @@ def _trial_result(
         if candidate_error_code(exception):
             return "candidate_invalid", None, "candidate"
         return "infrastructure_failed", None, "ambiguous"
-    if reward_schema == "reviewbench":
+    if _uses_reviewbench_metric(result, reward_schema):
         reviewbench_reward = _reviewbench_reward(result)
         if reviewbench_reward is None:
             return "infrastructure_failed", None, "evaluator"

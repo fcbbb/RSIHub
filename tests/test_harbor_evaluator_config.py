@@ -215,7 +215,10 @@ def test_init_accepts_reviewbench_reward_schema(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("mutate", "message"),
     [
-        (lambda config: config["evaluator"].update(reward_schema="unknown"), "must be 'scalar' or 'reviewbench'"),
+        (
+            lambda config: config["evaluator"].update(reward_schema="unknown"),
+            "must be 'scalar', 'reviewbench', or 'multibench'",
+        ),
         (lambda config: config["evaluator"].update(k=2, repetitions=2), "requires evaluator.repetitions: 1"),
         (lambda config: config["evaluator"].update(partial_floor=0.9), "requires evaluator.partial_floor: 1.0"),
     ],

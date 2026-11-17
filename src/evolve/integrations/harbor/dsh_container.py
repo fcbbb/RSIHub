@@ -108,12 +108,8 @@ class DshContainerAgent(BaseAgent):
         env.setdefault("DSH_CONTEXT_WINDOW", "1000000")
         env.setdefault("DSH_TELEMETRY_DISABLED", "1")
 
-        api_key = env.get("OPENAI_API_KEY") or env.get("DEEPSEEK_API_KEY")
-        if api_key:
-            env["DEEPSEEK_API_KEY"] = api_key
-        base_url = env.get("OPENAI_BASE_URL") or env.get("OPENAI_API_BASE")
-        if base_url:
-            env["DEEPSEEK_BASE_URL"] = base_url
+        if "OPENAI_BASE_URL" not in env and "OPENAI_API_BASE" in env:
+            env["OPENAI_BASE_URL"] = env["OPENAI_API_BASE"]
         return env
 
     @override

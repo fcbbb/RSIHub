@@ -1,6 +1,11 @@
 import importlib.util
 import json
+import shutil
+import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 HARBOR_EVALUATOR = Path(__file__).resolve().parents[1] / "scaffolds" / "evaluators" / "harbor"
 spec = importlib.util.spec_from_file_location("harbor_artifacts", HARBOR_EVALUATOR / "harbor_artifacts.py")
@@ -835,3 +840,54 @@ def test_replay_envelope_parses_reviewbench_structured_evidence(tmp_path: Path) 
     assert [(failure["id"], failure["category"]) for failure in evidence["failures"]] == [
         ("pkg/module.py:9-10", "reliability")
     ]
+
+
+def test_multibench_task_names_identify_sources_and_official_reviewbench() -> None:
+    assert harbor_artifacts.task_source("deep_swe__case-1") == "deep_swe"
+    assert harbor_artifacts.task_source("reviewbench__official__case-2") == "reviewbench"
+    assert harbor_artifacts.task_source("swe_atlas__case-3") == "swe_atlas"
+    assert harbor_artifacts.task_source("unknown__case") is None
+    assert harbor_artifacts.is_official_reviewbench_task("reviewbench__official__case-2")
+    assert not harbor_artifacts.is_official_reviewbench_task("reviewbench__case-2")
+
+
+def test_multibench_parser_reports_equal_source_scores(tmp_path: Path) -> None:
+    evaluator = tmp_path / "evaluator"
+    shutil.copytree(HARBOR_EVALUATOR, evaluator, ignore=shutil.ignore_patterns("__pycache__"))
+    (evaluator / "eval.env").write_text(
+        "EVOLVE_REWARD_SCHEMA=multibench\nEVOLVE_HARBOR_EXPECTED_TRIALS=4\nEVOLVE_HARBOR_ATTEMPTS=1\n"
+    )
+    jobs = tmp_path / "jobs"
+    write_trial(jobs / "deep-swe", task="deep_swe__case", trial="one", reward=1.0)
+    write_reviewbench_trial(
+        jobs / "reviewbench-official",
+        task="reviewbench__official__pr-1",
+        trial="one",
+        counts=_counts(candidate=10, matched_tp=8, golden_tp=10, golden_covered=8),
+    )
+    write_reviewbench_trial(
+        jobs / "reviewbench-undefined",
+        task="reviewbench__pr-2",
+        trial="one",
+        counts=_counts(candidate=0, matched_tp=0, golden_tp=0, golden_covered=0),
+    )
+    write_trial(jobs / "swe-atlas", task="swe_atlas__case", trial="one", reward=0.0)
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    result = subprocess.run(
+        [sys.executable, str(evaluator / "parse_score.py"), str(jobs), str(run_dir), "0"],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    metrics = json.loads((run_dir / "metrics.json").read_text())["dimensions"]
+    assert metrics["score_components"] == {
+        "deep_swe": 1.0,
+        "reviewbench": pytest.approx(0.8),
+        "reviewbench_official_25": pytest.approx(0.8),
+        "swe_atlas": 0.0,
+    }
+    assert metrics["pass_rate"] == pytest.approx(0.6)

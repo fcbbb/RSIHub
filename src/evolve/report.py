@@ -40,6 +40,8 @@ def format_status(workspace: Path) -> str:
         f"best_score: {_value(best.get('score') if best else None)}",
         f"budget_spent_usd: {_format_number(_budget_spent(rows))}",
     ]
+    if best is not None:
+        lines.extend(_score_component_lines("best_score", best.get("score_components")))
     for status, count in sorted(Counter(str(row.get("status", "pending")) for row in rows).items()):
         lines.append(f"status.{status}: {count}")
     if rows:
@@ -85,6 +87,7 @@ def format_report(workspace: Path) -> str:
     if anchor is not None:
         lines.append(f"anchor.best_genid: {anchor['genid']}")
         lines.append(f"anchor.best_score: {_value(anchor['score'])}")
+        lines.extend(_score_component_lines("anchor.best_score", anchor.get("score_components")))
     evidence = _latest_diagnostics(rows)
     if evidence is not None:
         row, diagnostics = evidence
@@ -160,6 +163,7 @@ def _claim_evaluations(
         {
             "genid": row.get("genid"),
             "score": row["score"],
+            "score_components": row.get("score_components"),
             "task_set_hash": row["task_set_hash"],
             "kind": "eval",
         }
@@ -172,6 +176,7 @@ def _claim_evaluations(
                     {
                         "genid": row.get("genid"),
                         "score": entry["score"],
+                        "score_components": entry.get("score_components"),
                         "task_set_hash": entry["task_set_hash"],
                         "kind": "anchor",
                     }
@@ -216,6 +221,19 @@ def _value(value: Any) -> str:
     if _is_number(value):
         return _format_number(float(value))
     return str(value)
+
+
+def _score_component_lines(prefix: str, components: object) -> list[str]:
+    if not isinstance(components, dict):
+        return []
+    lines = []
+    for name, value in sorted(components.items()):
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            continue
+        if not _is_number(value):
+            continue
+        lines.append(f"{prefix}.{name}: {_format_number(float(value))}")
+    return lines
 
 
 def _format_number(value: float) -> str:

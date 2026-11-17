@@ -598,3 +598,54 @@ def test_harbor_rollout_can_shuffle_train_minibatches_by_generation(tmp_path: Pa
     assert first != second
     assert len(first) == len(set(first)) == 5
     assert set(first) <= set(names)
+
+
+def test_source_repository_split_keeps_groups_together_and_official_tasks_sealed(
+    tmp_path: Path,
+) -> None:
+    dataset = tmp_path / "grouped-tasks"
+    dataset.mkdir()
+    groups = (
+        ("deep_swe", "repo-a", 2, False),
+        ("deep_swe", "repo-b", 2, False),
+        ("reviewbench", "official-repo", 1, True),
+        ("reviewbench", "repo-c", 2, False),
+        ("reviewbench", "repo-d", 2, False),
+        ("swe_atlas", "repo-e", 2, False),
+        ("swe_atlas", "repo-f", 2, False),
+    )
+    for source, repository, count, official in groups:
+        for index in range(count):
+            name = f"{source}-{repository}-{index}"
+            task = dataset / name
+            task.mkdir()
+            official_field = "evolve_official_test = true\n" if official else ""
+            (task / "task.toml").write_text(
+                f'version = "1.0"\nname = "{name}"\n\n'
+                "[metadata]\n"
+                f'evolve_source = "{source}"\n'
+                f'evolve_repository = "https://example.test/{repository}"\n'
+                f"{official_field}"
+            )
+
+    config = {
+        "train": 0.7,
+        "gate": 0.0,
+        "sealed": 0.3,
+        "seed": 17,
+        "group_by": "source_repository",
+    }
+    manifest = build_manifest(
+        dataset.as_posix(),
+        config,
+        base_dir=tmp_path,
+        sampling="static",
+        gate_limit=0,
+    )
+
+    assert manifest["group_by"] == "source_repository"
+    assert manifest["group_assignments"]["reviewbench::https://example.test/official-repo"] == "sealed"
+    task_splits = {task: split for split, tasks in manifest["tasks"].items() for task in tasks}
+    for group, members in manifest["group_members"].items():
+        assert {task_splits[member] for member in members} == {manifest["group_assignments"][group]}
+    assert splits_module.parse_manifest(json.dumps(manifest)) == manifest

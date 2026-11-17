@@ -35,6 +35,7 @@ STAMPED_FIELDS = {
     "outcome",
     "trials",
     "score",
+    "score_components",
     "cost_usd",
     "wall_s",
     "artifacts",

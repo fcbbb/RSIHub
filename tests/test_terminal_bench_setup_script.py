@@ -235,12 +235,20 @@ def test_setup_prepares_dataset_only_for_hyperagents_dsh(tmp_path: Path) -> None
 
 def test_setup_builds_dsh_compaction_overlay_for_ahe_dsh(tmp_path: Path) -> None:
     environment, calls_path = _environment(tmp_path)
-    Path(environment["DOCKER_STATE"]).write_text(json.dumps({
-        "evolve-mutate-dsh:20261113-dsh021rc5-musl": "0.2.1-rc.5",
-    }))
+    Path(environment["DOCKER_STATE"]).write_text(
+        json.dumps(
+            {
+                "evolve-mutate-dsh:20261113-dsh021rc5-musl": "0.2.1-rc.5",
+            }
+        )
+    )
     result = subprocess.run(
-        ["bash", str(SCRIPT), "ahe_dsh"], cwd=ROOT, env=environment,
-        text=True, capture_output=True, check=False,
+        ["bash", str(SCRIPT), "ahe_dsh"],
+        cwd=ROOT,
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
     )
 
     assert result.returncode == 0, result.stderr

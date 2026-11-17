@@ -205,6 +205,13 @@ Pass the real local task directory with `--dataset`; this overrides
 `evaluator.dataset` during initialization. `evolve init` freezes task names and
 content identities into `evaluator/splits.json`.
 
+For local Harbor datasets with `metadata.evolve_source` and
+`metadata.evolve_repository` on every task, add
+`group_by: source_repository` to the split mapping to stratify by source while
+keeping each repository in one partition. A task marked
+`metadata.evolve_official_test = true` protects its whole source/repository
+group in `sealed`.
+
 - **train** data may feed rollout analysis and mutation.
 - **gate** data decides whether a candidate is eligible to advance.
 - **sealed** data is an evaluation anchor and must not be exposed as mutation

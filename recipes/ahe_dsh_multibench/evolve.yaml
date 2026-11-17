@@ -1,0 +1,114 @@
+experiment:
+  id: ahe_dsh_multibench
+  max_generations: 5
+  target_score: null
+  children_per_gen: 1
+  mode: driver
+  seed: 0
+
+target:
+  seed: builtin-dsh-harbor
+
+surface:
+  # Preserve the current ahe_dsh editable surface and frozen Harbor seams.
+  include:
+    - target/**
+  exclude:
+    - target/agent.py
+    - target/dsh_trajectory.py
+    - target/runners/**
+
+operators:
+  select:
+    operator: ahe_latest
+    timeout_s: 600
+    config: {}
+  rollout:
+    operator: parent_evaluation
+    timeout_s: 600
+    config: {field_limit: 2000}
+  analyze:
+    operator: ahe
+    # Thirty tasks run serially with up to three 900-second debugger attempts.
+    timeout_s: 86400
+    config:
+      max_tasks: 30
+      # Run one debugger task at a time; SWE-Atlas tasks have high resource caps.
+      max_concurrent: 1
+      timeout_per_task: 900
+      debugger_max_retries: 2
+      field_limit: 2000
+      # 0.5 treats ReviewBench F1 as a useful pass/fail signal while preserving
+      # binary 0/1 outcomes for DeepSWE and SWE-Atlas.
+      pass_threshold: 0.5
+      debugger:
+        runner: harbor
+        agent: evolve.integrations.harbor.dsh_container:DshContainerAgent
+        model: openai/deepseek-v4.1-flash-1017
+        environment: docker
+        image: evolve-mutate-dsh:20261117-dsh021rc5-cwfix-compaction
+        agent_kwargs: {role: analyst, version: 0.2.1-rc.5}
+        agent_env: {DSH_CONTEXT_WINDOW: "1000000", DSH_MAX_TOKENS: "49152"}
+  mutate:
+    operator: ahe
+    timeout_s: 3600
+    config:
+      runner: harbor
+      expose_gate_data: false
+      agent: evolve.integrations.harbor.dsh_container:DshContainerAgent
+      model: openai/deepseek-v4.1-flash-1017
+      environment: docker
+      image: evolve-mutate-dsh:20261117-dsh021rc5-cwfix-compaction
+      editable_roots: [target]
+      prompt_path: target/profile.cordis.yml
+      agent_kwargs: {role: mutate, version: 0.2.1-rc.5}
+      agent_env: {DSH_CONTEXT_WINDOW: "1000000", DSH_MAX_TOKENS: "49152"}
+      max_retries: 1
+  validate:
+    operator: node_check
+    timeout_s: 300
+    config: {}
+  gate:
+    operator: ahe_artifact_valid
+    timeout_s: 600
+    config: {}
+  record:
+    operator: jsonl
+    timeout_s: 600
+    config: {}
+  timeout_s: 600
+
+evaluator:
+  engine: harbor
+  model: openai/deepseek-v4.1-flash-1017
+  dataset: /Leiyuanyuan/datasets/Combined-DeepSWE-ReviewBench-SWE-Atlas
+  agent: target.agent:DshAgent
+  evaluation_split: train
+  # RSIHub stratifies by source and keeps repository groups together at init.
+  split: {train: 0.7, gate: 0.0, sealed: 0.3, seed: 0, group_by: source_repository}
+  sampling: static
+  # Planned train quota: DeepSWE 79 + SWE-Atlas TW 63 + ReviewBench 130.
+  # Keep in sync with the frozen split manifest produced for the combined data.
+  tasks_per_round: 272
+  repetitions: 1
+  # User-selected benchmark concurrency. Eight SWE-Atlas containers can request
+  # up to 128 CPU / 128 GiB combined; server resource exhaustion is possible.
+  n_concurrent: 8
+  anchor: {final: true, every_rounds: 0}
+  max_retries: 1
+  benchmark_timeout_is_zero: true
+  partial_floor: 1.0
+  # Requires mixed per-task reward extraction: scalar for DeepSWE/SWE-Atlas,
+  # ReviewBench per-PR F1 for ReviewBench tasks.
+  reward_schema: multibench
+  agent_timeout_multiplier: 2
+  verifier_timeout_multiplier: 3
+  agent_allowed_hosts:
+    - token-plan.cn-beijing.maas.aliyuncs.com
+  verifier_env:
+    EVAL_MODEL: deepseek-v4.1-flash-1017
+  agent_env:
+    DSH_CONTEXT_WINDOW: "1000000"
+    DSH_MAX_TOKENS: "49152"
+    DSH_TASK_TIMEOUT_SEC: "10800"
+    DSH_RUNTIME_IMAGE: evolve-mutate-dsh:20261104-dsh021rc5

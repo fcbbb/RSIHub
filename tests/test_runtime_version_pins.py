@@ -69,4 +69,7 @@ def test_shipped_mutation_image_tags_match_their_role():
                 *COMPACTION_IMAGES,
             }
     assert COMPACTION_IMAGES["evolve-mutate-dsh:20261117-dsh021rc5-musl-cwfix-compaction"] == PINS["DSH_MUTATE_IMAGE"]
-    assert COMPACTION_IMAGES["evolve-mutate-dsh:20261117-dsh021rc5-cwfix-compaction"] == "evolve-mutate-dsh:20261104-dsh021rc5"
+    assert (
+        COMPACTION_IMAGES["evolve-mutate-dsh:20261117-dsh021rc5-cwfix-compaction"]
+        == "evolve-mutate-dsh:20261104-dsh021rc5"
+    )

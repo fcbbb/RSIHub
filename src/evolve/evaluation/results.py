@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from collections import defaultdict
 from dataclasses import asdict, dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -82,6 +83,7 @@ class EvaluationRecord:
     cost_usd: float
     wall_s: float
     scoreable_trials: int = 0
+    score_components: dict[str, float] | None = None
     retry_of: int | None = None
     artifacts: dict[str, str] | None = None
     source_attempts: tuple[int, ...] = ()
@@ -137,6 +139,8 @@ class EvaluationRecord:
             payload.pop("contract_certified")
         if self.diagnostics is None:
             payload.pop("diagnostics")
+        if self.score_components is None:
+            payload.pop("score_components")
         return payload
 
 
@@ -173,6 +177,7 @@ def classify_evaluation(
     expected_trials: int,
     partial_floor: float = 1.0,
     benchmark_timeout_is_zero: bool = False,
+    score_aggregation: str = "task_mean",
     setup_outcome: Outcome | None = None,
     setup_reason: str | None = None,
     **values: Any,
@@ -223,11 +228,34 @@ def classify_evaluation(
         outcome, reason = Outcome.INFRASTRUCTURE_FAILED, "insufficient scoreable trial evidence"
     else:
         outcome, reason = Outcome.TIMEOUT, "non-scoreable timeout"
-    score = (
-        sum(float(trial.reward) for trial in scoreable if trial.reward is not None) / expected_trials
-        if outcome is Outcome.BENCHMARK_COMPLETE
-        else None
-    )
+    score_components: dict[str, float] | None = None
+    score = None
+    if outcome is Outcome.BENCHMARK_COMPLETE:
+        if score_aggregation == "task_mean":
+            score = sum(float(trial.reward) for trial in scoreable if trial.reward is not None) / expected_trials
+        elif score_aggregation == "equal_source_macro":
+            by_source: dict[str, list[float]] = defaultdict(list)
+            official_reviewbench: list[float] = []
+            for trial in scoreable:
+                source = _benchmark_source(trial.task_id)
+                if source is None:
+                    raise ValueError(f"task {trial.task_id!r} is missing a recognized benchmark source prefix")
+                if trial.reward is not None:
+                    by_source[source].append(float(trial.reward))
+                    if source == "reviewbench" and _is_official_reviewbench_task(trial.task_id):
+                        official_reviewbench.append(float(trial.reward))
+            expected_sources = ("deep_swe", "reviewbench", "swe_atlas")
+            missing_sources = [source for source in expected_sources if not by_source[source]]
+            if missing_sources:
+                raise ValueError(
+                    "equal-source macro score is missing completed tasks for: " + ", ".join(missing_sources)
+                )
+            score_components = {source: sum(by_source[source]) / len(by_source[source]) for source in expected_sources}
+            score = sum(score_components.values()) / len(score_components)
+            if official_reviewbench:
+                score_components["reviewbench_official_25"] = sum(official_reviewbench) / len(official_reviewbench)
+        else:
+            raise ValueError(f"unknown score aggregation: {score_aggregation!r}")
     return EvaluationRecord(
         **values,
         expected_trials=expected_trials,
@@ -236,4 +264,21 @@ def classify_evaluation(
         reason=reason,
         score=score,
         scoreable_trials=len(scoreable),
+        score_components=score_components,
     )
+
+
+def _benchmark_source(task_id: str) -> str | None:
+    short_name = task_id.rsplit("/", 1)[-1]
+    for prefix, source in (
+        ("deep_swe__", "deep_swe"),
+        ("reviewbench__", "reviewbench"),
+        ("swe_atlas__", "swe_atlas"),
+    ):
+        if short_name.startswith(prefix):
+            return source
+    return None
+
+
+def _is_official_reviewbench_task(task_id: str) -> bool:
+    return task_id.rsplit("/", 1)[-1].startswith("reviewbench__official__")

@@ -13,6 +13,7 @@ represents.
 - [Agentic Harness Engineering on ReviewBench, five-task fast iteration](ahe_dsh_reviewbench_fast/README.md)
 - [Agentic Harness Engineering on SWE-Atlas unit tests](ahe_dsh_sweatlas/README.md)
 - [Agentic Harness Engineering on deep-swe](ahe_dsh_deepswe/README.md)
+- [Agentic Harness Engineering on the combined DeepSWE, ReviewBench, and SWE-Atlas set](ahe_dsh_multibench/README.md)
 - [GEPA](gepa/README.md)
 - [GEPA, fully local](gepa_local/README.md)
 - [Hill Climb](hill_climb/README.md)
@@ -31,6 +32,8 @@ and deep-swe coding datasets respectively. All three use the same dsh mutation
 image but not the Terminal-Bench assets, and all three inject the model host
 into the agent-phase allowlist at run time with
 `evaluator.agent_allowed_hosts`.
+`ahe_dsh_multibench` combines those three sources, groups splits by source and
+repository, and uses an equal-source macro-average score.
 The setup script downloads and verifies the source dataset and builds only the
 selected recipe's pinned MiniSWE, Codex, or dsh-headless mutation-agent image:
 

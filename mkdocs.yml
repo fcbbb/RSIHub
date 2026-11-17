@@ -49,6 +49,7 @@ nav:
       - Experiment viewer: guides/experiment-viewer.md
       - Local Harbor environment: guides/local-environment.md
       - ReviewBench evaluation: guides/reviewbench.md
+      - AHE + DSH multi-benchmark plan: guides/ahe-dsh-multibench.md
   - Reference:
       - Environment Variables: reference/environment-variables.md
       - Operator overview: reference/operators.md

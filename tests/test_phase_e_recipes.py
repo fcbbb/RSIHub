@@ -11,6 +11,7 @@ SUPPORTED_RECIPES = {
     "ahe_codex",
     "ahe_dsh",
     "ahe_dsh_deepswe",
+    "ahe_dsh_multibench",
     "ahe_dsh_reviewbench",
     "ahe_dsh_reviewbench_fast",
     "ahe_dsh_sweatlas",
@@ -32,6 +33,7 @@ MAIN_RECIPES = SUPPORTED_RECIPES - {
     "ahe_dsh_reviewbench_fast",
     "ahe_dsh_sweatlas",
     "ahe_dsh_deepswe",
+    "ahe_dsh_multibench",
 }
 DSH_RECIPES = {
     "ahe_dsh",
@@ -39,12 +41,14 @@ DSH_RECIPES = {
     "ahe_dsh_reviewbench_fast",
     "ahe_dsh_sweatlas",
     "ahe_dsh_deepswe",
+    "ahe_dsh_multibench",
 }
 TERMINAL_BENCH_DATASET = "terminal-bench-2-30-v1"
 CODEX_IMAGE = "evolve-mutate-codex:20260818-codex0146"
 CODEX_FULL_IMAGE = "evolve-mutate-codex:20260904-codex0149"
 MINISWE_IMAGE = "evolve-mutate-app:20260724-tools-mswe245"
 DSH_IMAGE = "evolve-mutate-dsh:20261117-dsh021rc5-musl-cwfix-compaction"
+MULTIBENCH_DSH_IMAGE = "evolve-mutate-dsh:20261117-dsh021rc5-cwfix-compaction"
 
 
 def _config(name: str) -> str:
@@ -176,6 +180,15 @@ def test_supported_recipes_use_harbor_and_method_mutate() -> None:
             "gate": "ahe_artifact_valid",
             "record": "jsonl",
         },
+        "ahe_dsh_multibench": {
+            "select": "ahe_latest",
+            "rollout": "parent_evaluation",
+            "analyze": "ahe",
+            "mutate": "ahe",
+            "validate": "node_check",
+            "gate": "ahe_artifact_valid",
+            "record": "jsonl",
+        },
         "gepa": {
             "select": "pareto",
             "rollout": "harbor",
@@ -298,7 +311,8 @@ def test_supported_recipes_use_harbor_and_method_mutate() -> None:
             debugger = resolved.operators["analyze"].config["debugger"]
             assert debugger["agent"] == "evolve.integrations.harbor.dsh_container:DshContainerAgent"
             assert debugger["agent_kwargs"]["role"] == "analyst"
-            assert debugger["image"] == DSH_IMAGE
+            expected_image = MULTIBENCH_DSH_IMAGE if name == "ahe_dsh_multibench" else DSH_IMAGE
+            assert debugger["image"] == expected_image
         elif name == "hyperagents_dsh":
             assert config["target"]["seed"] == "builtin-dsh"
             assert mutate["runner"] == "local"
@@ -317,11 +331,12 @@ def test_codex_mutates_use_the_preinstalled_codex_image() -> None:
 def test_dsh_mutate_uses_the_headless_mutation_image() -> None:
     for name in sorted(DSH_RECIPES):
         mutate = _operator_config(name, "mutate")
-        assert mutate["image"] == DSH_IMAGE
+        expected_image = MULTIBENCH_DSH_IMAGE if name == "ahe_dsh_multibench" else DSH_IMAGE
+        assert mutate["image"] == expected_image
         assert mutate["runner"] == "harbor"
         assert mutate["agent"] == "evolve.integrations.harbor.dsh_container:DshContainerAgent"
         debugger = _operator_config(name, "analyze")["debugger"]
-        assert debugger["image"] == DSH_IMAGE
+        assert debugger["image"] == expected_image
         assert debugger["agent_kwargs"]["role"] == "analyst"
 
 
@@ -422,6 +437,8 @@ def test_explicit_recipe_retry_and_multiplier_values_stay_conservative() -> None
         ("ahe_dsh_reviewbench", "agent_timeout_multiplier"): 2,
         ("ahe_dsh_reviewbench_fast", "agent_timeout_multiplier"): 2,
         ("ahe_dsh_sweatlas", "verifier_timeout_multiplier"): 3,
+        ("ahe_dsh_multibench", "agent_timeout_multiplier"): 2,
+        ("ahe_dsh_multibench", "verifier_timeout_multiplier"): 3,
     }
 
     def walk(value, recipe: str):

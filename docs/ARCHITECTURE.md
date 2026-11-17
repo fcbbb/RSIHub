@@ -53,9 +53,9 @@ decision (and usually a demolition pass) instead of silent sprawl.
 | `evaluation/contract.py` | 500 | resolve, hash, persist, and project the single authoritative evaluation contract identity |
 | `evaluation/diagnostics.py` | 375 | materialize missing trials and own bounded diagnostic projection and validation |
 | `evaluation/evidence.py` | 175 | evaluator-output reading, validation, and conversion into canonical trial results |
-| `evaluation/execution.py` | 600 | clean-checkout canonical evaluation: preflight gate, run plan, interrupted-round resume discovery, tree assertion, lifecycle, artifacts, and score parsing |
+| `evaluation/execution.py` | 625 | clean-checkout canonical evaluation: preflight gate, run plan, interrupted-round resume discovery, tree assertion, lifecycle, artifacts, and score parsing |
 | `evaluation/legacy.py` | 275 | read-only task-set identity compatibility for pre-contract workspaces |
-| `evaluation/results.py` | 250 | evaluation result types, outcome classification, and persisted record shape |
+| `evaluation/results.py` | 300 | evaluation result types, task or equal-source scoring, outcome classification, and persisted score components |
 | `evaluation/run_plan.py` | 100 | authoritative per-attempt task, trial-count, commit, and runtime plan |
 | `execution_runtime/__init__.py` | 25 | execution-runtime package facade |
 | `execution_runtime/command.py` | 50 | shell-facing runtime endpoint resolver |
@@ -93,7 +93,7 @@ decision (and usually a demolition pass) instead of silent sprawl.
 | `runtime/config.py` | 300 | inline runtime validation, endpoint identity, canonical resolution, and trusted loading |
 | `runtime/environment.py` | 450 | strict and legacy role-specific credential, endpoint, proxy, template, and redacted Harbor environment planning |
 | `runtime/uv.py` | 550 | locked uv candidate-runtime construction and command execution |
-| `splits.py` | 650 | freeze content-backed task identity/membership and materialize authoritative limited runtime selections |
+| `splits.py` | 700 | freeze content-backed task identity/membership, source-stratified repository groups, and authoritative runtime selections |
 | `surface.py` | 150 | mutable-surface pattern matching and violation checks |
 | `trace_analysis.py` | 775 | deterministic shared transforms used by the independent analyze operator variants |
 | `workspace.py` | 1100 | `evolve init` scaffolding: file copies, composition materialization, deterministic dataset and Harbor runtime config, protocol stamping, safe seed + mechanism vendoring, inner-skill copy |
@@ -138,7 +138,7 @@ each workspace, immutable there because it sits outside the mutable surface
 | `frozen/interfaces.py` | 375 | operator ABCs, registry, result schemas, and strict operator payload validation |
 | `frozen/sdk.py` | 350 | Python operator entrypoint and file-contract IO; no library algorithm policy |
 
-Total `src/evolve/` budget: **27650 lines**. The budget admits the read-only experiment viewer,
+Total `src/evolve/` budget: **27775 lines**. The budget admits the read-only experiment viewer,
 the explicit content-backed
 evaluation-contract boundaries, the opt-in in-place Harbor runtime, and the redacted trace-analysis
 boundary between rollout and feedback assembly; if the mechanism wants to

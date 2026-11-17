@@ -207,6 +207,9 @@ def evaluate(
                             setup_reason=preflight.failure_message or "ordinary preflight failed",
                             partial_floor=float(evaluator.get("partial_floor", 0.9)),
                             benchmark_timeout_is_zero=timeout_zero,
+                            score_aggregation=(
+                                "equal_source_macro" if evaluator.get("reward_schema") == "multibench" else "task_mean"
+                            ),
                             cost_usd=0.0,
                             wall_s=time.monotonic() - start,
                             artifacts=None,
@@ -242,6 +245,9 @@ def evaluate(
                             setup_reason=verification.reason,
                             partial_floor=float(evaluator.get("partial_floor", 0.9)),
                             benchmark_timeout_is_zero=timeout_zero,
+                            score_aggregation=(
+                                "equal_source_macro" if evaluator.get("reward_schema") == "multibench" else "task_mean"
+                            ),
                             cost_usd=0.0,
                             wall_s=time.monotonic() - start,
                             artifacts=None,
@@ -265,6 +271,9 @@ def evaluate(
                             setup_reason=runtime.reason,
                             partial_floor=float(evaluator.get("partial_floor", 0.9)),
                             benchmark_timeout_is_zero=timeout_zero,
+                            score_aggregation=(
+                                "equal_source_macro" if evaluator.get("reward_schema") == "multibench" else "task_mean"
+                            ),
                             cost_usd=0.0,
                             wall_s=time.monotonic() - start,
                             artifacts=None,
@@ -317,6 +326,9 @@ def evaluate(
                             setup_reason=setup_reason,
                             partial_floor=float(evaluator.get("partial_floor", 0.9)),
                             benchmark_timeout_is_zero=timeout_zero,
+                            score_aggregation=(
+                                "equal_source_macro" if evaluator.get("reward_schema") == "multibench" else "task_mean"
+                            ),
                             cost_usd=read_cost(run_dir),
                             wall_s=time.monotonic() - start,
                             artifacts=_evaluation_artifact_reference(workspace, run_dir),

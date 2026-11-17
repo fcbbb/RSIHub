@@ -1,3 +1,4 @@
+import importlib
 import importlib.util
 import json
 import random
@@ -119,8 +120,19 @@ def _write_archive(ctx: OperatorContext, rows: list[dict]) -> None:
     (ctx.workspace / "archive.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
 
 
-def _fake_debugger(checkout, prompt, ctx, *, output_dir, job_name, timeout_s, input_files=None):
-    del checkout, ctx, output_dir, job_name, timeout_s, input_files
+def _fake_debugger(
+    checkout,
+    prompt,
+    ctx,
+    *,
+    output_dir,
+    job_name,
+    timeout_s,
+    input_files=None,
+    input_paths=None,
+    input_path_sha256=None,
+):
+    del checkout, ctx, output_dir, job_name, timeout_s, input_files, input_paths, input_path_sha256
     response = "ROOT CAUSE: retry policy" if "ROOT CAUSE:" in prompt else "KEY STRATEGY: inspect first"
     return AgentRunResult(response, "", response, 0, 0.1, {"usd": 0.25})
 
@@ -313,14 +325,16 @@ def test_ahe_debugger_keeps_trace_evidence_out_of_prompt() -> None:
     job = module._build_jobs([case], 90)[0]
 
     prompt = module._debugger_prompt(job)
-    evidence = module._debugger_evidence(job)
+    evidence = module._debugger_evidence(job, [{"trial_name": "task-a", "status": "missing"}])
 
     assert "/app/task/inputs/trace-evidence.json" in prompt
+    assert "trace_reader.py search" in prompt
     assert "TRACE BODY MUST STAY ON DISK" not in prompt
-    assert "TRACE BODY MUST STAY ON DISK" in evidence
+    assert "TRACE BODY MUST STAY ON DISK" not in evidence
+    assert '"status": "missing"' in evidence
 
 
-def test_ahe_debugger_mounts_one_trace_evidence_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ahe_debugger_mounts_trace_index_and_reader(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     module = _module()
     ctx = _ctx(tmp_path)
     job = module._build_jobs([_case("task-a", "failed", 0)], 90)[0]
@@ -334,8 +348,192 @@ def test_ahe_debugger_mounts_one_trace_evidence_file(tmp_path: Path, monkeypatch
 
     module._run_debugger_job(ctx.checkout, ctx, job)
 
-    assert list(captured["input_files"]) == ["trace-evidence.json"]
+    assert set(captured["input_files"]) == {"trace-evidence.json", "trace_reader.py"}
+    assert captured["input_paths"] == {}
     assert '"task_name": "task-a"' in captured["input_files"]["trace-evidence.json"]
+    assert '"status": "missing"' in captured["input_files"]["trace-evidence.json"]
+    assert "def search_file" in captured["input_files"]["trace_reader.py"]
+
+
+def test_ahe_debugger_mounts_verified_full_trace_by_reference(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _module()
+    ctx = _ctx(tmp_path)
+    evidence_dir = ctx.run_dir / "rollout" / "diagnostic-evidence"
+    evidence_dir.mkdir(parents=True)
+    source = evidence_dir / "trial-a.jsonl"
+    full_text = "FULL_TIMEOUT_DIAGNOSTIC_MUST_STAY_OUT_OF_INDEX"
+    source.write_text(
+        json.dumps(
+            {
+                "record_index": 0,
+                "record_type": "trajectory_step",
+                "event": {"observation": full_text},
+            }
+        )
+        + "\n"
+    )
+    digest = __import__("hashlib").sha256(source.read_bytes()).hexdigest()
+    case = _normalize_for_test(module, _case("trial-a", "failed", 0))
+    case["diagnostic_trace"] = {
+        "schema_version": 1,
+        "status": "available",
+        "source_format": "atif",
+        "path": source.relative_to(ctx.workspace).as_posix(),
+        "sha256": digest,
+        "size_bytes": source.stat().st_size,
+        "event_count": 1,
+        "diagnostic_count": 0,
+        "redacted": True,
+    }
+    job = module._build_jobs([case], 90)[0]
+    captured = {}
+
+    def capture(*args, **kwargs):
+        captured.update(kwargs)
+        return _fake_debugger(*args, **kwargs)
+
+    monkeypatch.setattr(module, "run_readonly_agent", capture)
+    module._run_debugger_job(ctx.checkout, ctx, job)
+
+    index = json.loads(captured["input_files"]["trace-evidence.json"])
+    [trace] = index["traces"]
+    assert trace["input_file"] == f"trace-{digest}.jsonl"
+    assert trace["event_count"] == 1
+    assert trace["status"] == "available"
+    assert full_text not in captured["input_files"]["trace-evidence.json"]
+    assert captured["input_paths"][trace["input_file"]] == source
+    assert captured["input_path_sha256"] == {trace["input_file"]: digest}
+
+
+def _normalize_for_test(module, case: dict) -> dict:
+    return module._normalize(case, 2000)
+
+
+def test_ahe_single_task_smoke_finds_late_timeout_with_event_citation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _module()
+    ctx = _ctx(tmp_path)
+    evidence_dir = ctx.run_dir / "rollout" / "diagnostic-evidence"
+    evidence_dir.mkdir(parents=True)
+    source = evidence_dir / "trial-timeout.jsonl"
+    records = [
+        {
+            "record_index": index,
+            "record_type": "trajectory_step",
+            "event": {
+                "observation": "normal progress"
+                if index < 48
+                else "TimeoutError: verifier command exceeded its deadline"
+            },
+        }
+        for index in range(49)
+    ]
+    source.write_text("".join(json.dumps(row) + "\n" for row in records))
+    digest = __import__("hashlib").sha256(source.read_bytes()).hexdigest()
+    case = _normalize_for_test(module, _case("trial-timeout", "timeout", None))
+    case["diagnostic_trace"] = {
+        "schema_version": 1,
+        "status": "available",
+        "source_format": "atif",
+        "path": source.relative_to(ctx.workspace).as_posix(),
+        "sha256": digest,
+        "size_bytes": source.stat().st_size,
+        "event_count": len(records),
+        "diagnostic_count": 0,
+        "redacted": True,
+    }
+    job = module._build_jobs([case], 90)[0]
+    reader = importlib.import_module("library.analyze._trace_reader")
+
+    def smoke_runner(*args, input_files, input_paths, **kwargs):
+        del args, kwargs
+        assert "trace_reader.py" in input_files
+        [filename] = input_paths
+        match = reader.search_file(input_paths[filename], "TimeoutError")[0]
+        excerpt = reader.read_slice(
+            input_paths[filename],
+            match["record_index"],
+            "event.observation",
+            match["matches"][0][0],
+            120,
+        )
+        assert "exceeded its deadline" in excerpt["text"]
+        response = f"ROOT CAUSE: verifier timeout. Evidence: trial=trial-timeout, record_index={match['record_index']}."
+        return AgentRunResult(response, "", response, 0, 0.1, {"usd": 0.0})
+
+    monkeypatch.setattr(module, "run_readonly_agent", smoke_runner)
+    result = module._run_debugger_job(ctx.checkout, ctx, job)
+
+    assert "trial=trial-timeout" in result.response
+    assert "record_index=48" in result.response
+
+
+def test_ahe_debugger_rejects_tampered_trace_reference(tmp_path: Path) -> None:
+    module = _module()
+    ctx = _ctx(tmp_path)
+    evidence_dir = ctx.run_dir / "rollout" / "diagnostic-evidence"
+    evidence_dir.mkdir(parents=True)
+    source = evidence_dir / "trial-a.jsonl"
+    source.write_text('{"record_index":0}\n')
+    case = _normalize_for_test(module, _case("trial-a", "failed", 0))
+    case["diagnostic_trace"] = {
+        "schema_version": 1,
+        "status": "available",
+        "path": source.relative_to(ctx.workspace).as_posix(),
+        "sha256": "0" * 64,
+        "event_count": 1,
+        "redacted": True,
+    }
+
+    [index], paths = module._stage_diagnostic_traces(module._build_jobs([case], 90)[0], ctx.workspace, ctx.run_dir)
+
+    assert index["status"] == "integrity_error"
+    assert paths == {}
+
+
+def test_ahe_debugger_rejects_path_outside_diagnostic_root(tmp_path: Path) -> None:
+    module = _module()
+    ctx = _ctx(tmp_path)
+    case = _normalize_for_test(module, _case("trial-a", "failed", 0))
+    case["diagnostic_trace"] = {
+        "schema_version": 1,
+        "status": "available",
+        "redacted": True,
+        "path": "../outside.jsonl",
+        "sha256": "0" * 64,
+        "event_count": 1,
+    }
+
+    [index], paths = module._stage_diagnostic_traces(module._build_jobs([case], 90)[0], ctx.workspace, ctx.run_dir)
+
+    assert index["status"] == "invalid_reference"
+    assert paths == {}
+
+
+def test_ahe_debugger_rejects_symlinked_diagnostic_trace(tmp_path: Path) -> None:
+    module = _module()
+    ctx = _ctx(tmp_path)
+    evidence_dir = ctx.run_dir / "rollout" / "diagnostic-evidence"
+    evidence_dir.mkdir(parents=True)
+    outside = tmp_path / "outside.jsonl"
+    outside.write_text('{"record_index":0}\n')
+    link = evidence_dir / "trial-a.jsonl"
+    link.symlink_to(outside)
+    case = _normalize_for_test(module, _case("trial-a", "failed", 0))
+    case["diagnostic_trace"] = {
+        "schema_version": 1,
+        "status": "available",
+        "redacted": True,
+        "path": link.relative_to(ctx.workspace).as_posix(),
+        "sha256": "0" * 64,
+        "event_count": 1,
+    }
+
+    [index], paths = module._stage_diagnostic_traces(module._build_jobs([case], 90)[0], ctx.workspace, ctx.run_dir)
+
+    assert index["status"] == "invalid_reference"
+    assert paths == {}
 
 
 def test_ahe_debugger_retries_and_fails_visibly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

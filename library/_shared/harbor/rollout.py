@@ -186,6 +186,7 @@ class HarborRollout(RolloutOperator):
                 tasks_dir=tasks_dir,
                 workspace=ctx.workspace,
                 trajectory_archive_dir=rollout_dir / "trajectories",
+                diagnostic_evidence_dir=rollout_dir / "diagnostic-evidence",
             ),
             split_task_names,
         )
@@ -222,12 +223,24 @@ class HarborRollout(RolloutOperator):
             "mean_observed_reward": round(sum(rewards) / len(rewards), 6) if rewards else None,
             "jobs_dir": str(jobs_dir),
         }
+        run_relative = ctx.run_dir.relative_to(ctx.workspace)
+        diagnostic_artifacts = sorted(
+            {
+                Path(reference["path"]).relative_to(run_relative).as_posix()
+                for case in cases
+                if isinstance(case.get("diagnostic_trace"), dict)
+                and isinstance((reference := case["diagnostic_trace"]).get("path"), str)
+                and reference.get("status") in {"available", "partial"}
+                and Path(reference["path"]).is_relative_to(run_relative)
+            }
+        )
         return RolloutResult(
             summary=summary,
             artifacts=[
                 "rollout/harbor.log",
                 "rollout/cases.json",
                 "rollout/harbor-state.json",
+                *diagnostic_artifacts,
                 f"harbor-jobs:{jobs_dir}",
             ],
         )

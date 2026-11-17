@@ -1,3 +1,4 @@
+import hashlib
 import importlib
 import json
 import os
@@ -1027,3 +1028,129 @@ def test_counts_without_reviewbench_schema_stay_unscored(tmp_path: Path) -> None
 
     assert case["reward"] is None
     assert case["outcome"] == "incomplete"
+
+
+def test_harbor_archives_full_redacted_trace_and_verifier_evidence(tmp_path: Path) -> None:
+    workspace = tmp_path
+    jobs = workspace / "runs" / "gen-7" / "rollout" / "jobs"
+    trial = _write_trial(jobs, name="long-trace", reward=0)
+    tail = "TAIL_TIMEOUT_REASON_AFTER_THE_OLD_LIMIT"
+    steps = []
+    for index in range(60):
+        content = "x" * 2500 + (tail if index == 59 else "")
+        steps.append(
+            {
+                "source": "agent",
+                "message": f"message-{index} " + ("m" * 2200 if index == 59 else ""),
+                "tool_calls": [
+                    {
+                        "function_name": "exec",
+                        "arguments": (
+                            {"command": "pytest", "OPENAI_API_KEY": "trace-secret-value"}
+                            if index == 0
+                            else {"command": f"pytest --case {index}"}
+                        ),
+                    }
+                ],
+                "observation": {"results": [{"content": content}]},
+            }
+        )
+    (trial / "agent" / "trajectory.json").write_text(json.dumps({"steps": steps}))
+    verifier_tail = "FULL_VERIFIER_FAILURE_AFTER_THE_OLD_LIMIT"
+    (trial / "verifier" / "test-stdout.txt").write_text(
+        "v" * 2500 + verifier_tail + "\nOPENAI_API_KEY=verifier-secret-value\n"
+    )
+    evidence_dir = workspace / "runs" / "gen-7" / "rollout" / "diagnostic-evidence"
+
+    [case] = harbor_evidence.collect_cases(
+        jobs,
+        field_limit=2000,
+        workspace=workspace,
+        diagnostic_evidence_dir=evidence_dir,
+    )
+
+    assert len(case["events"]) == 32
+    assert len(case["tool_calls"]) == 8
+    assert len(case["agent_messages"]) == 4
+    assert len(case["trajectory_events"]) == 60
+    reference = case["diagnostic_trace"]
+    assert reference["status"] == "available"
+    assert reference["event_count"] == 60
+    source = workspace / reference["path"]
+    content = source.read_text()
+    assert hashlib.sha256(source.read_bytes()).hexdigest() == reference["sha256"]
+    assert tail in content
+    assert verifier_tail in content
+    assert "trace-secret-value" not in content
+    assert "verifier-secret-value" not in content
+    assert "[REDACTED]" in content
+
+    reader = importlib.import_module("library.analyze._trace_reader")
+    rows = [json.loads(line) for line in content.splitlines()]
+    final = rows[59]
+    final_text = final["event"]["observation"]["results"][0]["content"]
+    match = reader.search_file(source, tail)
+    assert match[0]["record_index"] == 59
+    offset = final_text.index(tail)
+    excerpt = reader.read_slice(
+        source,
+        59,
+        "event.observation.results.0.content",
+        offset - 10,
+        len(tail) + 20,
+    )
+    assert tail in excerpt["text"]
+    assert excerpt["next_offset"] is None
+
+
+def test_harbor_archives_full_codex_session_fallback(tmp_path: Path) -> None:
+    workspace = tmp_path
+    jobs = workspace / "runs" / "gen-2" / "rollout" / "jobs"
+    trial = _write_trial(jobs, name="codex-session", reward=0)
+    (trial / "agent" / "trajectory.json").unlink()
+    session = trial / "agent" / "sessions" / "session.jsonl"
+    session.parent.mkdir(parents=True)
+    tail = "CODEX_TIMEOUT_REASON_AFTER_THE_OLD_LIMIT"
+    rows = [
+        {
+            "timestamp": f"t{index}",
+            "type": "event_msg",
+            "payload": {
+                "type": "agent_message",
+                "message": ("m" * 2500 + tail) if index == 39 else f"message-{index}",
+            },
+        }
+        for index in range(40)
+    ]
+    session.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    evidence_dir = workspace / "runs" / "gen-2" / "rollout" / "diagnostic-evidence"
+
+    [case] = harbor_evidence.collect_cases(
+        jobs,
+        workspace=workspace,
+        diagnostic_evidence_dir=evidence_dir,
+    )
+
+    reference = case["diagnostic_trace"]
+    assert reference["source_format"] == "codex-session-jsonl"
+    assert reference["event_count"] == 40
+    assert tail in (workspace / reference["path"]).read_text()
+
+
+def test_harbor_keeps_corrupt_trace_diagnostic_without_failing_collection(tmp_path: Path) -> None:
+    workspace = tmp_path
+    jobs = workspace / "runs" / "gen-3" / "rollout" / "jobs"
+    trial = _write_trial(jobs, name="corrupt-trace", reward=0)
+    (trial / "agent" / "trajectory.json").write_text("corrupt trace with TIMEOUT detail")
+    evidence_dir = workspace / "runs" / "gen-3" / "rollout" / "diagnostic-evidence"
+
+    [case] = harbor_evidence.collect_cases(
+        jobs,
+        workspace=workspace,
+        diagnostic_evidence_dir=evidence_dir,
+    )
+
+    reference = case["diagnostic_trace"]
+    assert reference["status"] == "partial"
+    assert reference["source_format"] == "atif-unparsed"
+    assert "corrupt trace with TIMEOUT detail" in (workspace / reference["path"]).read_text()

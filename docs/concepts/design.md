@@ -63,10 +63,15 @@ Development smoke recipes live under `tests/fixtures/recipes/` and are not part
 of the public recipe inventory.
 
 Harbor rollouts publish a versioned, facts-only runtime state artifact alongside
-the method-neutral cases. The feedback bundle makes train-role state available
-to mutators without adding a planner, diagnostic replay, or other algorithmic
-stage. The publisher records provenance and explicit unavailability; it does
-not convert runtime observations into diagnoses or mutation recommendations.
+the method-neutral cases. They also retain complete, redacted ATIF and Codex
+session evidence as integrity-checked JSONL sidecars referenced by each case.
+AHE gives its debugger a short trial index and mounts validated sidecars read-only;
+the debugger searches and reads relevant event ranges on demand instead of using
+summary limits as evidence boundaries. Missing or invalid sidecars remain explicit
+and fall back to the compact case evidence. The feedback bundle makes train-role
+state available to mutators without adding a planner, diagnostic replay, or other
+algorithmic stage. The publisher records provenance and explicit unavailability;
+it does not convert runtime observations into diagnoses or mutation recommendations.
 
 ## Declarative operator configuration
 

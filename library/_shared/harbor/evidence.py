@@ -69,6 +69,210 @@ def _clip(value: object, limit: int, *, tail: bool = False) -> str:
     return marker + text[-kept:] if tail else text[:kept] + marker
 
 
+def _sanitize_full(value: Any) -> Any:
+    """Redact sensitive values without clipping evidence content."""
+    if isinstance(value, str):
+        return _redact(value)
+    if isinstance(value, list):
+        return [_sanitize_full(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            str(key): ("[REDACTED]" if _SENSITIVE_ENV_NAME.search(str(key)) else _sanitize_full(item))
+            for key, item in value.items()
+        }
+    return value
+
+
+def _full_diagnostic_records(trial_dir: Path, payload: Mapping[str, Any]) -> tuple[str, list[dict[str, Any]], int, int]:
+    """Return every trace event and textual verifier/exception diagnostic."""
+    records: list[dict[str, Any]] = []
+    source_format = "missing"
+    event_count = 0
+    trajectory_path = trial_dir / "agent" / "trajectory.json"
+
+    if trajectory_path.is_file() and not trajectory_path.is_symlink():
+        try:
+            trajectory = json.loads(trajectory_path.read_text(errors="replace"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            raw = _read_full_text(trajectory_path)
+            records.append(
+                {
+                    "record_index": len(records),
+                    "record_type": "unparsed_trajectory",
+                    "source_path": "agent/trajectory.json",
+                    "content": _redact(raw),
+                }
+            )
+            source_format = "atif-unparsed"
+        else:
+            steps = trajectory.get("steps") if isinstance(trajectory, dict) else None
+            if isinstance(steps, list) and steps:
+                source_format = "atif"
+                for step_index, step in enumerate(steps):
+                    records.append(
+                        {
+                            "record_index": len(records),
+                            "record_type": "trajectory_step",
+                            "source_format": source_format,
+                            "source_index": step_index,
+                            "event": _sanitize_full(step),
+                        }
+                    )
+                event_count = len(steps)
+
+    if event_count == 0:
+        session_root = trial_dir / "agent" / "sessions"
+        session_paths = sorted(session_root.rglob("*.jsonl")) if session_root.is_dir() else []
+        for session_path in session_paths:
+            if session_path.is_symlink():
+                continue
+            try:
+                stream = session_path.open(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            source_format = "codex-session-jsonl"
+            with stream:
+                for line_index, line in enumerate(stream):
+                    if not line.strip():
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        record_type = "unparsed_session_line"
+                        safe_event: Any = _redact(line.rstrip("\n"))
+                    else:
+                        record_type = "codex_session_event"
+                        safe_event = _sanitize_full(event)
+                    records.append(
+                        {
+                            "record_index": len(records),
+                            "record_type": record_type,
+                            "source_format": source_format,
+                            "source_path": session_path.relative_to(trial_dir).as_posix(),
+                            "source_index": line_index,
+                            "event": safe_event,
+                        }
+                    )
+                    event_count += 1
+
+    verifier_root = trial_dir / "verifier"
+    if verifier_root.is_dir() and not verifier_root.is_symlink():
+        for path in sorted(verifier_root.rglob("*")):
+            if not path.is_file() or path.is_symlink() or path.name in {"reward.txt", "reward.json"}:
+                continue
+            try:
+                path.resolve().relative_to(verifier_root.resolve())
+                content = _read_full_text(path)
+            except (OSError, ValueError):
+                continue
+            if "\x00" in content:
+                continue
+            if path.suffix.lower() in {".json", ".jsonl"}:
+                try:
+                    if path.suffix.lower() == ".json":
+                        parsed: Any = json.loads(content)
+                    else:
+                        parsed = [json.loads(line) for line in content.splitlines() if line.strip()]
+                except json.JSONDecodeError:
+                    parsed = _redact(content)
+                else:
+                    parsed = _sanitize_full(parsed)
+            else:
+                parsed = _redact(content)
+            records.append(
+                {
+                    "record_index": len(records),
+                    "record_type": "verifier_artifact",
+                    "source_path": path.relative_to(trial_dir).as_posix(),
+                    "content": parsed,
+                }
+            )
+
+    exception = payload.get("exception_info")
+    if isinstance(exception, dict) and exception:
+        records.append(
+            {
+                "record_index": len(records),
+                "record_type": "exception",
+                "content": _sanitize_full(exception),
+            }
+        )
+    verifier_evidence = payload.get("verifier_evidence")
+    if isinstance(verifier_evidence, dict) and verifier_evidence:
+        records.append(
+            {
+                "record_index": len(records),
+                "record_type": "verifier_evidence",
+                "content": _sanitize_full(verifier_evidence),
+            }
+        )
+
+    diagnostic_count = len(records) - event_count
+    return source_format, records, event_count, diagnostic_count
+
+
+def _read_full_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+def _write_diagnostic_trace(
+    trial_dir: Path,
+    payload: Mapping[str, Any],
+    *,
+    trial_name: str,
+    workspace: Path | None,
+    evidence_dir: Path | None,
+) -> dict[str, Any]:
+    if workspace is None or evidence_dir is None:
+        return {"schema_version": 1, "status": "unavailable", "reason": "no evidence archive"}
+    try:
+        workspace_root = workspace.resolve(strict=True)
+        evidence_path = Path(os.path.abspath(evidence_dir)).relative_to(workspace_root)
+    except (OSError, ValueError):
+        return {"schema_version": 1, "status": "unavailable", "reason": "archive outside workspace"}
+    safe_evidence_dir = workspace_root
+    for part in evidence_path.parts:
+        safe_evidence_dir = safe_evidence_dir / part
+        if safe_evidence_dir.is_symlink():
+            return {"schema_version": 1, "status": "unavailable", "reason": "archive path uses symlink"}
+    evidence_dir = safe_evidence_dir
+
+    source_format, records, event_count, diagnostic_count = _full_diagnostic_records(trial_dir, payload)
+    if not records:
+        return {
+            "schema_version": 1,
+            "status": "missing",
+            "source_format": source_format,
+            "event_count": 0,
+            "diagnostic_count": 0,
+        }
+
+    identity = hashlib.sha256(trial_name.encode("utf-8")).hexdigest()[:20]
+    destination = evidence_dir / f"trial-{identity}.jsonl"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.is_symlink():
+        return {"schema_version": 1, "status": "unavailable", "reason": "archive file is a symlink"}
+    with destination.open("w", encoding="utf-8") as stream:
+        for record in records:
+            stream.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
+    destination.chmod(0o600)
+    relative = _workspace_relative(destination, workspace)
+    if relative is None:
+        destination.unlink(missing_ok=True)
+        return {"schema_version": 1, "status": "unavailable", "reason": "archive path escaped workspace"}
+    return {
+        "schema_version": 1,
+        "status": "available" if event_count else "partial",
+        "source_format": source_format,
+        "path": relative,
+        "sha256": _file_sha256(destination),
+        "size_bytes": destination.stat().st_size,
+        "event_count": event_count,
+        "diagnostic_count": diagnostic_count,
+        "redacted": True,
+    }
+
+
 def _read_json(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text())
@@ -692,6 +896,7 @@ def collect_cases(
     tasks_dir: Path | None = None,
     workspace: Path | None = None,
     trajectory_archive_dir: Path | None = None,
+    diagnostic_evidence_dir: Path | None = None,
 ) -> list[dict[str, Any]]:
     cases: list[dict[str, Any]] = []
     if not jobs_dir.exists():
@@ -715,6 +920,13 @@ def collect_cases(
         verifier_rewards = verifier_rewards if isinstance(verifier_rewards, dict) else {}
         verifier_evidence = _verifier_evidence_payload(payload)
         details = _trajectory_details(trial_dir, field_limit)
+        diagnostic_trace = _write_diagnostic_trace(
+            trial_dir,
+            payload,
+            trial_name=str(payload["trial_name"]),
+            workspace=workspace,
+            evidence_dir=diagnostic_evidence_dir,
+        )
         instruction = details["instruction"] or _task_instruction(tasks_dir, str(payload.get("task_name")), field_limit)
         trajectory = _trajectory_reference(
             trial_dir,
@@ -760,6 +972,7 @@ def collect_cases(
                 "observations": details["observations"],
                 "events": details["events"],
                 "trajectory_events": details["trajectory_events"],
+                "diagnostic_trace": diagnostic_trace,
                 "raw_agent_output": details["raw_agent_output"],
                 "verifier_output": _verifier_output(trial_dir, field_limit, verifier_evidence),
                 "verifier_evidence": verifier_evidence,

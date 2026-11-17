@@ -247,6 +247,7 @@ def _normalize(case: Case, field_limit: int) -> Case:
         "tool_calls": _bounded(tool_calls, field_limit),
         "observations": _bounded(observations, field_limit),
         "events": _bounded(events, field_limit),
+        "diagnostic_trace": _dict(case.get("diagnostic_trace")),
         "final_response": final_response,
         "verifier_output": _clip(case.get("verifier_output") or "", field_limit),
         "verifier_rewards": _bounded(_dict(case.get("verifier_rewards")), field_limit),
@@ -363,19 +364,99 @@ def _trace_labels(job: TaskAnalysisJob) -> str:
     )
 
 
-def _debugger_evidence(job: TaskAnalysisJob) -> str:
+def _debugger_evidence(job: TaskAnalysisJob, trace_index: list[Case] | None = None) -> str:
     return (
         json.dumps(
             {
                 "task_name": job.task_name,
                 "trace_labels": _trace_labels(job),
-                "traces": list(job.cases),
+                "traces": trace_index or [],
             },
             indent=2,
             sort_keys=True,
         )
         + "\n"
     )
+
+
+def _stage_diagnostic_traces(
+    job: TaskAnalysisJob, workspace: Path, run_dir: Path
+) -> tuple[list[Case], dict[str, Path]]:
+    """Validate full-trace references and stage only files created by rollout."""
+    workspace_root = workspace.resolve(strict=True)
+    evidence_root = run_dir / "rollout" / "diagnostic-evidence"
+    staged: dict[str, Path] = {}
+    index: list[Case] = []
+    for case in job.cases:
+        reference = _dict(case.get("diagnostic_trace"))
+        item: Case = {
+            "trial_name": case.get("trial_name"),
+            "outcome": case.get("outcome"),
+            "event_count": reference.get("event_count", 0),
+            "diagnostic_count": reference.get("diagnostic_count", 0),
+            "source_format": reference.get("source_format", "unknown"),
+            "status": reference.get("status", "missing"),
+        }
+        relative_value = reference.get("path")
+        expected_digest = reference.get("sha256")
+        if not reference:
+            index.append(item)
+            continue
+        if reference.get("schema_version") != 1 or reference.get("redacted") is not True:
+            item.update(status="invalid_reference")
+            index.append(item)
+            continue
+        if (
+            item["status"] not in {"available", "partial"}
+            or not isinstance(relative_value, str)
+            or not isinstance(expected_digest, str)
+            or len(expected_digest) != 64
+        ):
+            index.append(item)
+            continue
+        relative = Path(relative_value)
+        if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
+            item.update(status="invalid_reference")
+            index.append(item)
+            continue
+        source = workspace_root.joinpath(*relative.parts)
+        try:
+            relative_to_workspace = source.relative_to(workspace_root)
+            current = workspace_root
+            for part in relative_to_workspace.parts:
+                current = current / part
+                if current.is_symlink():
+                    raise ValueError("symlink")
+            resolved = current.resolve(strict=True)
+            allowed_root = evidence_root.resolve(strict=True)
+            resolved.relative_to(allowed_root)
+            resolved.relative_to(workspace_root)
+        except (OSError, ValueError):
+            item.update(status="invalid_reference")
+            index.append(item)
+            continue
+        if not resolved.is_file():
+            item.update(status="unavailable")
+            index.append(item)
+            continue
+        digest = hashlib.sha256()
+        with resolved.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != expected_digest:
+            item.update(status="integrity_error")
+            index.append(item)
+            continue
+        input_name = f"trace-{expected_digest}.jsonl"
+        staged[input_name] = source
+        item.update(
+            status=reference["status"],
+            input_file=input_name,
+            sha256=expected_digest,
+            size_bytes=reference.get("size_bytes"),
+        )
+        index.append(item)
+    return index, staged
 
 
 def _debugger_prompt(job: TaskAnalysisJob) -> str:
@@ -390,7 +471,11 @@ def _debugger_prompt(job: TaskAnalysisJob) -> str:
             trace_labels=_trace_labels(job),
         )
         + "\n\n# Trace evidence\n\n"
-        + f"Read the complete bounded trace evidence from `{DEBUGGER_EVIDENCE_PATH}` before writing the report."
+        + f"Read the trial index from `{DEBUGGER_EVIDENCE_PATH}`. Full redacted event and verifier files are separate files in the same inputs directory. "
+        + "Use `python /app/task/inputs/trace_reader.py search <file> <term>` to locate timeout, error, failed-test, traceback, and retry evidence. "
+        + "Then use `trace_reader.py show <file> <record_index> --field <field> --offset <n> --length <n>` to inspect the relevant event and surrounding records. "
+        + "The full files are authoritative; do not infer that an event is absent from the short index. Cite each diagnosis with trial_name and record_index. "
+        + "If a trace is unavailable or its reference failed validation, state that limitation and use the remaining evidence."
     )
 
 
@@ -468,6 +553,7 @@ def _run_debugger_job(checkout: Path, ctx: OperatorContext, job: TaskAnalysisJob
     runner_ctx = replace(ctx, config=runner_config)
     slug = _safe_task_name(job.task_name)
     last_error: AgentCommandError | None = None
+    trace_index, trace_paths = _stage_diagnostic_traces(job, ctx.workspace, ctx.run_dir)
     for attempt in range(1, attempts + 1):
         try:
             result = run_readonly_agent(
@@ -477,7 +563,12 @@ def _run_debugger_job(checkout: Path, ctx: OperatorContext, job: TaskAnalysisJob
                 output_dir=ctx.run_dir / "analyze" / "debugger" / slug / f"attempt-{attempt}",
                 job_name=f"ahe-debug-{slug}-attempt-{attempt}",
                 timeout_s=timeout_s,
-                input_files={"trace-evidence.json": _debugger_evidence(job)},
+                input_files={
+                    "trace-evidence.json": _debugger_evidence(job, trace_index),
+                    "trace_reader.py": (Path(__file__).with_name("_trace_reader.py").read_text()),
+                },
+                input_paths=trace_paths,
+                input_path_sha256={name: name[len("trace-") : -len(".jsonl")] for name in trace_paths},
             )
             return DebuggerResult(job, result.output.strip(), dict(result.usage))
         except AgentCommandError as exc:

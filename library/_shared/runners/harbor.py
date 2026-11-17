@@ -1141,6 +1141,55 @@ def _usage(payload: dict[str, Any], wall_s: float) -> dict[str, Any]:
     }
 
 
+def _input_basename(name: str) -> None:
+    if Path(name).name != name or name in {".", ".."}:
+        raise ValueError("read-only input name must be one relative filename")
+
+
+def _copy_workspace_input(
+    source: Path,
+    workspace: Path,
+    destination: Path,
+    *,
+    expected_sha256: str | None = None,
+) -> None:
+    source = Path(source)
+    root = workspace.resolve(strict=True)
+    if not source.is_absolute():
+        raise ValueError("read-only input source must be an absolute workspace path")
+    try:
+        relative = source.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("read-only input source must stay inside the workspace") from exc
+    if not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
+        raise ValueError("read-only input source has an unsafe path")
+    current = root
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            raise ValueError("read-only input source must not use symlinks")
+    try:
+        resolved = current.resolve(strict=True)
+        resolved.relative_to(root)
+    except (OSError, ValueError) as exc:
+        raise ValueError("read-only input source is missing or escapes the workspace") from exc
+    if not resolved.is_file():
+        raise ValueError("read-only input source must be a regular file")
+    shutil.copyfile(resolved, destination)
+    if expected_sha256 is not None:
+        if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
+            destination.unlink(missing_ok=True)
+            raise ValueError("read-only input has an invalid integrity reference")
+        digest = hashlib.sha256()
+        with destination.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if digest.hexdigest() != expected_sha256:
+            destination.unlink(missing_ok=True)
+            raise ValueError("read-only input failed its integrity check")
+    destination.chmod(0o444)
+
+
 def run_readonly_agent(
     checkout: Path,
     prompt: str,
@@ -1150,6 +1199,8 @@ def run_readonly_agent(
     job_name: str,
     timeout_s: float,
     input_files: dict[str, str] | None = None,
+    input_paths: dict[str, Path] | None = None,
+    input_path_sha256: dict[str, str] | None = None,
 ) -> AgentRunResult:
     """Run one evidence-only Harbor agent and return its final response."""
     usage: dict[str, Any] = {"usd": 0, "wall_s": 0}
@@ -1170,13 +1221,28 @@ def run_readonly_agent(
         tasks_dir = output_dir / "tasks"
         task_root.mkdir(parents=True, exist_ok=False)
         (task_root / ".evolve-readonly").write_text("")
-        if input_files:
+        if input_files or input_paths:
             inputs = task_root / "inputs"
             inputs.mkdir()
-            for name, content in input_files.items():
-                if Path(name).name != name or name in {".", ".."}:
-                    raise ValueError(f"read-only input name must be one relative filename: {name!r}")
-                (inputs / name).write_text(content)
+            names = set(input_files or {}) | set(input_paths or {})
+            if len(names) != len(input_files or {}) + len(input_paths or {}):
+                raise ValueError("read-only input filenames must be unique")
+            if set(input_path_sha256 or {}) - set(input_paths or {}):
+                raise ValueError("read-only input digest has no matching file")
+            for name, content in (input_files or {}).items():
+                _input_basename(name)
+                destination = inputs / name
+                destination.write_text(content)
+                destination.chmod(0o444)
+            for name, source in (input_paths or {}).items():
+                _input_basename(name)
+                _copy_workspace_input(
+                    source,
+                    ctx.workspace,
+                    inputs / name,
+                    expected_sha256=(input_path_sha256 or {}).get(name),
+                )
+            inputs.chmod(0o555)
         prompt_path.write_text(prompt.rstrip() + "\n")
         _write_json(
             output_dir / "instruction-transport.json",

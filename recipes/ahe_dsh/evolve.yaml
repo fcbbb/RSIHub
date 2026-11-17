@@ -46,9 +46,9 @@ operators:
         agent: evolve.integrations.harbor.dsh_container:DshContainerAgent
         model: openai/deepseek-v4.1-flash-1017 
         environment: docker
-        image: evolve-mutate-dsh:20261113-dsh021rc5-musl
+        image: evolve-mutate-dsh:20261117-dsh021rc5-musl-cwfix-compaction
         agent_kwargs: {role: analyst, version: 0.2.1-rc.5}
-        agent_env: {DSH_CONTEXT_WINDOW: "131072"}
+        agent_env: {DSH_CONTEXT_WINDOW: "1000000", DSH_MAX_TOKENS: "49152"}
   mutate:
     operator: ahe
     timeout_s: 3600
@@ -58,11 +58,11 @@ operators:
       agent: evolve.integrations.harbor.dsh_container:DshContainerAgent
       model: openai/deepseek-v4.1-flash-1017 
       environment: docker
-      image: evolve-mutate-dsh:20261113-dsh021rc5-musl
+      image: evolve-mutate-dsh:20261117-dsh021rc5-musl-cwfix-compaction
       editable_roots: [target]
       prompt_path: target/profile.cordis.yml
       agent_kwargs: {role: mutate, version: 0.2.1-rc.5}
-      agent_env: {DSH_CONTEXT_WINDOW: "131072"}
+      agent_env: {DSH_CONTEXT_WINDOW: "1000000", DSH_MAX_TOKENS: "49152"}
       max_retries: 1
   validate:
     operator: node_check
@@ -93,5 +93,7 @@ evaluator:
   benchmark_timeout_is_zero: true
   partial_floor: 0.8
   agent_env:
+    DSH_CONTEXT_WINDOW: "1000000"
+    DSH_MAX_TOKENS: "49152"
     DSH_TASK_TIMEOUT_SEC: "1800"
     DSH_RUNTIME_IMAGE: evolve-mutate-dsh:20261113-dsh021rc5-musl

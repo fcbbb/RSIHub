@@ -578,16 +578,20 @@ done
             "DSH_DBIN": CONTAINER_DSH_BIN,
             "DSH_PATCHES": f"{OVERLAY_IN_CONTAINER}:{HARBOR_PATCH_IN_CONTAINER}",
             "DSH_CWD": cwd,
-            "DSH_PROVIDER": "deepseek-official",
+            "DSH_PROVIDER": "evolve-openai",
             "DSH_MODEL": model,
             "DSH_CONTEXT_WINDOW": self._env("DSH_CONTEXT_WINDOW", "1000000") or "1000000",
-            "DSH_MAX_TOKENS": self._env("DSH_MAX_TOKENS", "49152") or "49152",
+            "DSH_MAX_TOKENS": self._env("DSH_MAX_TOKENS", "32768") or "32768",
             "DSH_SESSION_ID": (self.session_id or "task").replace("/", "_"),
             "DSH_HOME": f"{CONTAINER_LOGS}/dsh-home",
             "DSH_TASK_FILE": TASK_IN_CONTAINER,
             "DSH_FINAL_FILE": f"{CONTAINER_LOGS}/final_response.txt",
             "DSH_EVENTS_FILE": f"{CONTAINER_LOGS}/dsh-events.jsonl",
             "DSH_RUN_TIMEOUT_SEC": str(max(1, timeout - 5)),
+            "OPENAI_API_KEY": self._env("OPENAI_API_KEY", "") or "",
+            "OPENAI_BASE_URL": self._env("OPENAI_BASE_URL", "")
+            or self._env("OPENAI_API_BASE", "")
+            or "",
             "DEEPSEEK_API_KEY": self._env("OPENAI_API_KEY", "") or "",
             "DEEPSEEK_BASE_URL": self._env("OPENAI_BASE_URL", "") or "",
         }

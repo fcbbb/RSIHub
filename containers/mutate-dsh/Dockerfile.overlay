@@ -1,0 +1,3 @@
+ARG BASE_IMAGE=evolve-mutate-dsh:20261113-dsh021rc5-musl
+FROM ${BASE_IMAGE}
+COPY headless.mutate.cordis.yml headless.analyst.cordis.yml /opt/evolve/dsh/

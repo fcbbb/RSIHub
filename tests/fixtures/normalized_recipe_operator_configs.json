@@ -1,5 +1,19 @@
 {
   "aevolve": {
+    "select": {
+      "seed": 0
+    },
+    "rollout": {
+      "agent_setup_timeout_multiplier": 1.0,
+      "budget_tasks": 10,
+      "field_limit": 2000,
+      "max_retries": 1,
+      "n_concurrent": 4,
+      "pass_threshold": 1.0,
+      "reuse_completed": false,
+      "seed": 0,
+      "task_sampling": "head"
+    },
     "analyze": {
       "history_cycles": 2,
       "judge_inherit_openai_credentials": false,
@@ -9,9 +23,6 @@
       "max_chars": 30000,
       "max_observations": 30,
       "pass_threshold": 1.0
-    },
-    "gate": {
-      "strict": true
     },
     "mutate": {
       "agent": "codex",
@@ -39,23 +50,19 @@
       "skills_dir": "target/skills",
       "trajectory_only": true
     },
-    "record": {},
-    "rollout": {
-      "agent_setup_timeout_multiplier": 1.0,
-      "budget_tasks": 10,
-      "field_limit": 2000,
-      "max_retries": 1,
-      "n_concurrent": 4,
-      "pass_threshold": 1.0,
-      "reuse_completed": false,
-      "seed": 0,
-      "task_sampling": "head"
+    "gate": {
+      "strict": true
     },
-    "select": {
-      "seed": 0
-    }
+    "record": {}
   },
   "ahe": {
+    "select": {
+      "seed": 0
+    },
+    "rollout": {
+      "field_limit": 2000,
+      "pass_threshold": 1.0
+    },
     "analyze": {
       "debugger_agent_kwargs": {
         "max_tokens": 64000,
@@ -68,7 +75,6 @@
       "pass_threshold": 1.0,
       "timeout_per_task": 600.0
     },
-    "gate": {},
     "mutate": {
       "agent": "codex",
       "agent_kwargs": {
@@ -87,16 +93,17 @@
       "runner": "harbor",
       "skills_dir": "target/skills"
     },
-    "record": {},
+    "gate": {},
+    "record": {}
+  },
+  "ahe_codex": {
+    "select": {
+      "seed": 0
+    },
     "rollout": {
       "field_limit": 2000,
       "pass_threshold": 1.0
     },
-    "select": {
-      "seed": 0
-    }
-  },
-  "ahe_codex": {
     "analyze": {
       "debugger_agent_kwargs": {
         "reasoning_effort": "high"
@@ -108,7 +115,6 @@
       "pass_threshold": 1.0,
       "timeout_per_task": 600.0
     },
-    "gate": {},
     "mutate": {
       "agent": "codex",
       "agent_kwargs": {
@@ -126,28 +132,30 @@
       "runner": "harbor",
       "skills_dir": "target/skills"
     },
-    "record": {},
-    "rollout": {
-      "field_limit": 2000,
-      "pass_threshold": 1.0
-    },
-    "select": {
-      "seed": 0
-    }
+    "gate": {},
+    "record": {}
   },
   "ahe_dsh": {
+    "select": {
+      "seed": 0
+    },
+    "rollout": {
+      "field_limit": 2000,
+      "pass_threshold": 1.0
+    },
     "analyze": {
       "debugger": {
         "agent": "evolve.integrations.harbor.dsh_container:DshContainerAgent",
         "agent_env": {
-          "DSH_CONTEXT_WINDOW": "131072"
+          "DSH_CONTEXT_WINDOW": "1000000",
+          "DSH_MAX_TOKENS": "49152"
         },
         "agent_kwargs": {
           "role": "analyst",
           "version": "0.2.1-rc.5"
         },
         "environment": "docker",
-        "image": "evolve-mutate-dsh:20261113-dsh021rc5-musl",
+        "image": "evolve-mutate-dsh:20261117-dsh021rc5-musl-cwfix-compaction",
         "model": "openai/deepseek-v4.1-flash-1017",
         "runner": "harbor"
       },
@@ -158,11 +166,11 @@
       "pass_threshold": 1.0,
       "timeout_per_task": 900.0
     },
-    "gate": {},
     "mutate": {
       "agent": "evolve.integrations.harbor.dsh_container:DshContainerAgent",
       "agent_env": {
-        "DSH_CONTEXT_WINDOW": "131072"
+        "DSH_CONTEXT_WINDOW": "1000000",
+        "DSH_MAX_TOKENS": "49152"
       },
       "agent_kwargs": {
         "role": "mutate",
@@ -173,35 +181,37 @@
       ],
       "environment": "docker",
       "expose_gate_data": false,
-      "image": "evolve-mutate-dsh:20261113-dsh021rc5-musl",
+      "image": "evolve-mutate-dsh:20261117-dsh021rc5-musl-cwfix-compaction",
       "max_retries": 1,
       "model": "openai/deepseek-v4.1-flash-1017",
       "prompt_path": "target/profile.cordis.yml",
       "runner": "harbor"
     },
-    "record": {},
-    "rollout": {
-      "field_limit": 2000,
-      "pass_threshold": 1.0
-    },
-    "select": {
-      "seed": 0
-    },
-    "validate": {}
+    "validate": {},
+    "gate": {},
+    "record": {}
   },
   "ahe_dsh_deepswe": {
+    "select": {
+      "seed": 0
+    },
+    "rollout": {
+      "field_limit": 2000,
+      "pass_threshold": 1.0
+    },
     "analyze": {
       "debugger": {
         "agent": "evolve.integrations.harbor.dsh_container:DshContainerAgent",
         "agent_env": {
-          "DSH_CONTEXT_WINDOW": "131072"
+          "DSH_CONTEXT_WINDOW": "1000000",
+          "DSH_MAX_TOKENS": "49152"
         },
         "agent_kwargs": {
           "role": "analyst",
           "version": "0.2.1-rc.5"
         },
         "environment": "docker",
-        "image": "evolve-mutate-dsh:20261113-dsh021rc5-musl",
+        "image": "evolve-mutate-dsh:20261117-dsh021rc5-musl-cwfix-compaction",
         "model": "openai/deepseek-v4.1-flash-1017",
         "runner": "harbor"
       },
@@ -212,11 +222,11 @@
       "pass_threshold": 1.0,
       "timeout_per_task": 900.0
     },
-    "gate": {},
     "mutate": {
       "agent": "evolve.integrations.harbor.dsh_container:DshContainerAgent",
       "agent_env": {
-        "DSH_CONTEXT_WINDOW": "131072"
+        "DSH_CONTEXT_WINDOW": "1000000",
+        "DSH_MAX_TOKENS": "49152"
       },
       "agent_kwargs": {
         "role": "mutate",
@@ -227,35 +237,93 @@
       ],
       "environment": "docker",
       "expose_gate_data": false,
-      "image": "evolve-mutate-dsh:20261113-dsh021rc5-musl",
+      "image": "evolve-mutate-dsh:20261117-dsh021rc5-musl-cwfix-compaction",
       "max_retries": 1,
       "model": "openai/deepseek-v4.1-flash-1017",
       "prompt_path": "target/profile.cordis.yml",
       "runner": "harbor"
     },
-    "record": {},
+    "validate": {},
+    "gate": {},
+    "record": {}
+  },
+  "ahe_dsh_multibench": {
+    "select": {
+      "seed": 0
+    },
     "rollout": {
       "field_limit": 2000,
       "pass_threshold": 1.0
     },
-    "select": {
-      "seed": 0
-    },
-    "validate": {}
-  },
-  "ahe_dsh_reviewbench": {
     "analyze": {
       "debugger": {
         "agent": "evolve.integrations.harbor.dsh_container:DshContainerAgent",
         "agent_env": {
-          "DSH_CONTEXT_WINDOW": "131072"
+          "DSH_CONTEXT_WINDOW": "1000000",
+          "DSH_MAX_TOKENS": "49152"
         },
         "agent_kwargs": {
           "role": "analyst",
           "version": "0.2.1-rc.5"
         },
         "environment": "docker",
-        "image": "evolve-mutate-dsh:20261113-dsh021rc5-musl",
+        "image": "evolve-mutate-dsh:20261117-dsh021rc5-cwfix-compaction",
+        "model": "openai/deepseek-v4.1-flash-1017",
+        "runner": "harbor"
+      },
+      "debugger_max_retries": 2,
+      "field_limit": 2000,
+      "max_concurrent": 1,
+      "max_tasks": 30,
+      "pass_threshold": 0.5,
+      "timeout_per_task": 900.0
+    },
+    "mutate": {
+      "agent": "evolve.integrations.harbor.dsh_container:DshContainerAgent",
+      "agent_env": {
+        "DSH_CONTEXT_WINDOW": "1000000",
+        "DSH_MAX_TOKENS": "49152"
+      },
+      "agent_kwargs": {
+        "role": "mutate",
+        "version": "0.2.1-rc.5"
+      },
+      "editable_roots": [
+        "target"
+      ],
+      "environment": "docker",
+      "expose_gate_data": false,
+      "image": "evolve-mutate-dsh:20261117-dsh021rc5-cwfix-compaction",
+      "max_retries": 1,
+      "model": "openai/deepseek-v4.1-flash-1017",
+      "prompt_path": "target/profile.cordis.yml",
+      "runner": "harbor"
+    },
+    "validate": {},
+    "gate": {},
+    "record": {}
+  },
+  "ahe_dsh_reviewbench": {
+    "select": {
+      "seed": 0
+    },
+    "rollout": {
+      "field_limit": 2000,
+      "pass_threshold": 1.0
+    },
+    "analyze": {
+      "debugger": {
+        "agent": "evolve.integrations.harbor.dsh_container:DshContainerAgent",
+        "agent_env": {
+          "DSH_CONTEXT_WINDOW": "1000000",
+          "DSH_MAX_TOKENS": "49152"
+        },
+        "agent_kwargs": {
+          "role": "analyst",
+          "version": "0.2.1-rc.5"
+        },
+        "environment": "docker",
+        "image": "evolve-mutate-dsh:20261117-dsh021rc5-musl-cwfix-compaction",
         "model": "openai/deepseek-v4.1-flash-1017",
         "runner": "harbor"
       },
@@ -266,11 +334,11 @@
       "pass_threshold": 0.5,
       "timeout_per_task": 900.0
     },
-    "gate": {},
     "mutate": {
       "agent": "evolve.integrations.harbor.dsh_container:DshContainerAgent",
       "agent_env": {
-        "DSH_CONTEXT_WINDOW": "131072"
+        "DSH_CONTEXT_WINDOW": "1000000",
+        "DSH_MAX_TOKENS": "49152"
       },
       "agent_kwargs": {
         "role": "mutate",
@@ -281,35 +349,37 @@
       ],
       "environment": "docker",
       "expose_gate_data": false,
-      "image": "evolve-mutate-dsh:20261113-dsh021rc5-musl",
+      "image": "evolve-mutate-dsh:20261117-dsh021rc5-musl-cwfix-compaction",
       "max_retries": 1,
       "model": "openai/deepseek-v4.1-flash-1017",
       "prompt_path": "target/profile.cordis.yml",
       "runner": "harbor"
     },
-    "record": {},
+    "validate": {},
+    "gate": {},
+    "record": {}
+  },
+  "ahe_dsh_reviewbench_fast": {
+    "select": {
+      "seed": 0
+    },
     "rollout": {
       "field_limit": 2000,
       "pass_threshold": 1.0
     },
-    "select": {
-      "seed": 0
-    },
-    "validate": {}
-  },
-  "ahe_dsh_reviewbench_fast": {
     "analyze": {
       "debugger": {
         "agent": "evolve.integrations.harbor.dsh_container:DshContainerAgent",
         "agent_env": {
-          "DSH_CONTEXT_WINDOW": "131072"
+          "DSH_CONTEXT_WINDOW": "1000000",
+          "DSH_MAX_TOKENS": "49152"
         },
         "agent_kwargs": {
           "role": "analyst",
           "version": "0.2.1-rc.5"
         },
         "environment": "docker",
-        "image": "evolve-mutate-dsh:20261113-dsh021rc5-musl",
+        "image": "evolve-mutate-dsh:20261117-dsh021rc5-musl-cwfix-compaction",
         "model": "openai/deepseek-v4.1-flash-1017",
         "runner": "harbor"
       },
@@ -320,11 +390,11 @@
       "pass_threshold": 0.5,
       "timeout_per_task": 900.0
     },
-    "gate": {},
     "mutate": {
       "agent": "evolve.integrations.harbor.dsh_container:DshContainerAgent",
       "agent_env": {
-        "DSH_CONTEXT_WINDOW": "131072"
+        "DSH_CONTEXT_WINDOW": "1000000",
+        "DSH_MAX_TOKENS": "49152"
       },
       "agent_kwargs": {
         "role": "mutate",
@@ -335,35 +405,37 @@
       ],
       "environment": "docker",
       "expose_gate_data": false,
-      "image": "evolve-mutate-dsh:20261113-dsh021rc5-musl",
+      "image": "evolve-mutate-dsh:20261117-dsh021rc5-musl-cwfix-compaction",
       "max_retries": 1,
       "model": "openai/deepseek-v4.1-flash-1017",
       "prompt_path": "target/profile.cordis.yml",
       "runner": "harbor"
     },
-    "record": {},
+    "validate": {},
+    "gate": {},
+    "record": {}
+  },
+  "ahe_dsh_sweatlas": {
+    "select": {
+      "seed": 0
+    },
     "rollout": {
       "field_limit": 2000,
       "pass_threshold": 1.0
     },
-    "select": {
-      "seed": 0
-    },
-    "validate": {}
-  },
-  "ahe_dsh_sweatlas": {
     "analyze": {
       "debugger": {
         "agent": "evolve.integrations.harbor.dsh_container:DshContainerAgent",
         "agent_env": {
-          "DSH_CONTEXT_WINDOW": "131072"
+          "DSH_CONTEXT_WINDOW": "1000000",
+          "DSH_MAX_TOKENS": "49152"
         },
         "agent_kwargs": {
           "role": "analyst",
           "version": "0.2.1-rc.5"
         },
         "environment": "docker",
-        "image": "evolve-mutate-dsh:20261113-dsh021rc5-musl",
+        "image": "evolve-mutate-dsh:20261117-dsh021rc5-musl-cwfix-compaction",
         "model": "openai/deepseek-v4.1-flash-1017",
         "runner": "harbor"
       },
@@ -374,11 +446,11 @@
       "pass_threshold": 1.0,
       "timeout_per_task": 900.0
     },
-    "gate": {},
     "mutate": {
       "agent": "evolve.integrations.harbor.dsh_container:DshContainerAgent",
       "agent_env": {
-        "DSH_CONTEXT_WINDOW": "131072"
+        "DSH_CONTEXT_WINDOW": "1000000",
+        "DSH_MAX_TOKENS": "49152"
       },
       "agent_kwargs": {
         "role": "mutate",
@@ -389,23 +461,31 @@
       ],
       "environment": "docker",
       "expose_gate_data": false,
-      "image": "evolve-mutate-dsh:20261113-dsh021rc5-musl",
+      "image": "evolve-mutate-dsh:20261117-dsh021rc5-musl-cwfix-compaction",
       "max_retries": 1,
       "model": "openai/deepseek-v4.1-flash-1017",
       "prompt_path": "target/profile.cordis.yml",
       "runner": "harbor"
     },
-    "record": {},
-    "rollout": {
-      "field_limit": 2000,
-      "pass_threshold": 1.0
-    },
+    "validate": {},
+    "gate": {},
+    "record": {}
+  },
+  "gepa": {
     "select": {
       "seed": 0
     },
-    "validate": {}
-  },
-  "gepa": {
+    "rollout": {
+      "agent_setup_timeout_multiplier": 1.0,
+      "budget_tasks": 10,
+      "field_limit": 2000,
+      "max_retries": 1,
+      "n_concurrent": 4,
+      "pass_threshold": 1.0,
+      "reuse_completed": false,
+      "seed": 0,
+      "task_sampling": "generation_shuffle"
+    },
     "analyze": {
       "components": {
         "system_prompt": [
@@ -418,7 +498,6 @@
       "field_limit": 4000,
       "max_cases": 10
     },
-    "gate": {},
     "mutate": {
       "agent": "codex",
       "agent_kwargs": {
@@ -445,29 +524,30 @@
       "required_placeholders": [],
       "runner": "harbor"
     },
-    "record": {},
-    "rollout": {
-      "agent_setup_timeout_multiplier": 1.0,
-      "budget_tasks": 10,
-      "field_limit": 2000,
-      "max_retries": 1,
-      "n_concurrent": 4,
-      "pass_threshold": 1.0,
-      "reuse_completed": false,
-      "seed": 0,
-      "task_sampling": "generation_shuffle"
-    },
-    "select": {
-      "seed": 0
-    },
     "validate": {
       "agent_setup_timeout_multiplier": 1.0,
       "criterion": "strict",
       "max_retries": 1,
       "n_concurrent": 4
-    }
+    },
+    "gate": {},
+    "record": {}
   },
   "gepa_local": {
+    "select": {
+      "seed": 0
+    },
+    "rollout": {
+      "budget_tasks": 8,
+      "environment": "evolve.harbor_local:LocalEnvironment",
+      "field_limit": 2000,
+      "max_retries": 1,
+      "n_concurrent": 2,
+      "pass_threshold": 1.0,
+      "reuse_completed": false,
+      "seed": 0,
+      "task_sampling": "head"
+    },
     "analyze": {
       "components": {
         "knowledge": [
@@ -477,7 +557,6 @@
       "field_limit": 2000,
       "max_cases": 8
     },
-    "gate": {},
     "mutate": {
       "agent": "evolve.integrations.harbor.local_auto_agent:LocalAutoAgent",
       "agent_kwargs": {
@@ -501,56 +580,19 @@
       "required_placeholders": [],
       "runner": "harbor"
     },
-    "record": {},
-    "rollout": {
-      "budget_tasks": 8,
-      "environment": "evolve.harbor_local:LocalEnvironment",
-      "field_limit": 2000,
-      "max_retries": 1,
-      "n_concurrent": 2,
-      "pass_threshold": 1.0,
-      "reuse_completed": false,
-      "seed": 0,
-      "task_sampling": "head"
-    },
-    "select": {
-      "seed": 0
-    },
     "validate": {
       "criterion": "non_decreasing",
       "environment": "evolve.harbor_local:LocalEnvironment",
       "max_retries": 1,
       "n_concurrent": 2
-    }
+    },
+    "gate": {},
+    "record": {}
   },
   "hill_climb": {
-    "analyze": {
-      "history_cycles": 2,
-      "max_chars": 30000,
-      "max_observations": 30
+    "select": {
+      "seed": 0
     },
-    "gate": {
-      "strict": false
-    },
-    "mutate": {
-      "agent": "codex",
-      "agent_kwargs": {
-        "reasoning_effort": "xhigh"
-      },
-      "editable_roots": [
-        "target"
-      ],
-      "environment": "docker",
-      "expose_gate_data": false,
-      "image": "evolve-mutate-codex:20260818-codex0146",
-      "max_retries": 1,
-      "memory_dir": "target/memory",
-      "model": "gpt-5.4",
-      "prompt_path": "target/src/minisweagent/config/mini.yaml",
-      "runner": "harbor",
-      "skills_dir": "target/skills"
-    },
-    "record": {},
     "rollout": {
       "agent_setup_timeout_multiplier": 1.0,
       "budget_tasks": 32,
@@ -562,18 +604,53 @@
       "seed": 0,
       "task_sampling": "head"
     },
-    "select": {
-      "seed": 0
-    }
-  },
-  "hill_climb_codex": {
     "analyze": {
       "history_cycles": 2,
       "max_chars": 30000,
       "max_observations": 30
     },
+    "mutate": {
+      "agent": "codex",
+      "agent_kwargs": {
+        "reasoning_effort": "xhigh"
+      },
+      "editable_roots": [
+        "target"
+      ],
+      "environment": "docker",
+      "expose_gate_data": false,
+      "image": "evolve-mutate-codex:20260818-codex0146",
+      "max_retries": 1,
+      "memory_dir": "target/memory",
+      "model": "gpt-5.4",
+      "prompt_path": "target/src/minisweagent/config/mini.yaml",
+      "runner": "harbor",
+      "skills_dir": "target/skills"
+    },
     "gate": {
       "strict": false
+    },
+    "record": {}
+  },
+  "hill_climb_codex": {
+    "select": {
+      "seed": 0
+    },
+    "rollout": {
+      "agent_setup_timeout_multiplier": 1.0,
+      "budget_tasks": 16,
+      "field_limit": 2000,
+      "max_retries": 1,
+      "n_concurrent": 4,
+      "pass_threshold": 1.0,
+      "reuse_completed": false,
+      "seed": 0,
+      "task_sampling": "head"
+    },
+    "analyze": {
+      "history_cycles": 2,
+      "max_chars": 30000,
+      "max_observations": 30
     },
     "mutate": {
       "agent": "codex",
@@ -593,29 +670,24 @@
       "runner": "harbor",
       "skills_dir": "target/skills"
     },
-    "record": {},
-    "rollout": {
-      "agent_setup_timeout_multiplier": 1.0,
-      "budget_tasks": 16,
-      "field_limit": 2000,
-      "max_retries": 1,
-      "n_concurrent": 4,
-      "pass_threshold": 1.0,
-      "reuse_completed": false,
-      "seed": 0,
-      "task_sampling": "head"
+    "gate": {
+      "strict": false
     },
-    "select": {
-      "seed": 0
-    }
+    "record": {}
   },
   "hyperagents": {
+    "select": {
+      "seed": 0
+    },
+    "rollout": {
+      "field_limit": 2000,
+      "pass_threshold": 1.0
+    },
     "analyze": {
       "history_cycles": 2,
       "max_chars": 30000,
       "max_observations": 30
     },
-    "gate": {},
     "mutate": {
       "agent": "codex",
       "agent_kwargs": {
@@ -635,23 +707,23 @@
       "runner": "harbor",
       "skills_dir": "target/skills"
     },
-    "record": {},
+    "validate": {},
+    "gate": {},
+    "record": {}
+  },
+  "hyperagents_codex": {
+    "select": {
+      "seed": 0
+    },
     "rollout": {
       "field_limit": 2000,
       "pass_threshold": 1.0
     },
-    "select": {
-      "seed": 0
-    },
-    "validate": {}
-  },
-  "hyperagents_codex": {
     "analyze": {
       "history_cycles": 2,
       "max_chars": 30000,
       "max_observations": 30
     },
-    "gate": {},
     "mutate": {
       "agent": "codex",
       "agent_kwargs": {
@@ -671,23 +743,31 @@
       "runner": "harbor",
       "skills_dir": "target/skills"
     },
-    "record": {},
-    "rollout": {
-      "field_limit": 2000,
-      "pass_threshold": 1.0
-    },
+    "validate": {},
+    "gate": {},
+    "record": {}
+  },
+  "hyperagents_codex_tbench_full": {
     "select": {
       "seed": 0
     },
-    "validate": {}
-  },
-  "hyperagents_codex_tbench_full": {
+    "rollout": {
+      "agent_setup_timeout_multiplier": 1.0,
+      "agent_timeout_multiplier": 1.0,
+      "budget_tasks": 50,
+      "field_limit": 2000,
+      "max_retries": 1,
+      "n_concurrent": 5,
+      "pass_threshold": 1.0,
+      "reuse_completed": false,
+      "seed": 0,
+      "task_sampling": "head"
+    },
     "analyze": {
       "history_cycles": 2,
       "max_chars": 30000,
       "max_observations": 30
     },
-    "gate": {},
     "mutate": {
       "agent": "codex",
       "agent_kwargs": {
@@ -708,31 +788,23 @@
       "runner": "harbor",
       "skills_dir": "target/skills"
     },
-    "record": {},
-    "rollout": {
-      "agent_setup_timeout_multiplier": 1.0,
-      "agent_timeout_multiplier": 1.0,
-      "budget_tasks": 50,
-      "field_limit": 2000,
-      "max_retries": 1,
-      "n_concurrent": 5,
-      "pass_threshold": 1.0,
-      "reuse_completed": false,
-      "seed": 0,
-      "task_sampling": "head"
-    },
+    "validate": {},
+    "gate": {},
+    "record": {}
+  },
+  "hyperagents_dsh": {
     "select": {
       "seed": 0
     },
-    "validate": {}
-  },
-  "hyperagents_dsh": {
+    "rollout": {
+      "field_limit": 2000,
+      "pass_threshold": 1.0
+    },
     "analyze": {
       "history_cycles": 2,
       "max_chars": 30000,
       "max_observations": 30
     },
-    "gate": {},
     "mutate": {
       "command": "python3 target/runners/mutate_local.py",
       "editable_roots": [
@@ -742,23 +814,23 @@
       "max_retries": 1,
       "runner": "local"
     },
-    "record": {},
+    "validate": {},
+    "gate": {},
+    "record": {}
+  },
+  "hyperagents_tbench_full": {
+    "select": {
+      "seed": 0
+    },
     "rollout": {
       "field_limit": 2000,
       "pass_threshold": 1.0
     },
-    "select": {
-      "seed": 0
-    },
-    "validate": {}
-  },
-  "hyperagents_tbench_full": {
     "analyze": {
       "history_cycles": 2,
       "max_chars": 30000,
       "max_observations": 30
     },
-    "gate": {},
     "mutate": {
       "agent": "evolve.integrations.harbor.miniswe_task_file:InstalledMiniSweAgent",
       "agent_kwargs": {
@@ -780,14 +852,8 @@
       "runner": "harbor",
       "skills_dir": "target/skills"
     },
-    "record": {},
-    "rollout": {
-      "field_limit": 2000,
-      "pass_threshold": 1.0
-    },
-    "select": {
-      "seed": 0
-    },
-    "validate": {}
+    "validate": {},
+    "gate": {},
+    "record": {}
   }
 }

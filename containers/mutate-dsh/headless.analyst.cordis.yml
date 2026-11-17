@@ -36,10 +36,20 @@
     streamIdleTimeoutMs: 600000
     # dsh's own default is 256000, which the gateway rejects when the model's
     # max_model_len is 131072. Cap below that; DSH_MAX_TOKENS may override.
-    maxTokens: !!js Number(process.env.DSH_MAX_TOKENS ?? 49152)
+    maxTokens: !!js Number(process.env.DSH_MAX_TOKENS ?? 32768)
+    defaultContextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW ?? 131072)
     models:
       - id: !!js process.env.DSH_MODEL ?? 'deepseek-v4-flash'
-        contextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW ?? 1000000)
+        contextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW ?? 131072)
+        maxTokens: !!js Number(process.env.DSH_MAX_TOKENS ?? 32768)
+
+- id: compaction-basic
+  name: '@deepseek-ai/dsh-compaction-basic'
+  config:
+    headroomTokens: 16384
+    maxTokens: 16384
+    thresholdRatio: 0.85
+    retainRatio: 0.10
 
 # No interactive approver in a one-shot debugger. `never` rejects approval
 # requests instead of hanging.

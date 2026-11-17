@@ -119,7 +119,12 @@ uv run --frozen ./runs/ahe_dsh/evolve run ./runs/ahe_dsh --max-generations 1 --c
   rebuild changed the image under the same tag; `setup_terminal_bench.sh`
   prints the current ID to copy in.
 - `DSH_MODEL` is derived from the stage's `model` (the `openai/` prefix is
-  stripped). `DSH_CONTEXT_WINDOW` is passed through `agent_env`.
+  stripped). `DSH_CONTEXT_WINDOW` and `DSH_MAX_TOKENS` pass through
+  `agent_env` and set the provider fallbacks used by context accounting.
+- The Harbor evaluator uses `evolve-openai` from the rollout composition and
+  receives `OPENAI_API_KEY` / `OPENAI_BASE_URL`; this keeps the request
+  protocol, model capacity, and compaction meter aligned with the
+  OpenAI-compatible endpoint.
 - The candidate may add any package the runtime already installs: profile rows
   for `@deepseek-ai/dsh-*` tools, model providers, or MCP resources, local
   `plugins/*.mjs`, and `skills/**` (enable with the installed `dsh-skill`,

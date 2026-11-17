@@ -44,7 +44,7 @@ TERMINAL_BENCH_DATASET = "terminal-bench-2-30-v1"
 CODEX_IMAGE = "evolve-mutate-codex:20260818-codex0146"
 CODEX_FULL_IMAGE = "evolve-mutate-codex:20260904-codex0149"
 MINISWE_IMAGE = "evolve-mutate-app:20260724-tools-mswe245"
-DSH_IMAGE = "evolve-mutate-dsh:20261113-dsh021rc5-musl"
+DSH_IMAGE = "evolve-mutate-dsh:20261117-dsh021rc5-musl-cwfix-compaction"
 
 
 def _config(name: str) -> str:
@@ -588,3 +588,14 @@ def test_harbor_evaluator_accepts_validated_runtime_concurrency_override() -> No
     contents = (ROOT / "scaffolds/evaluators/harbor/engine.sh").read_text()
     assert "EVOLVE_HARBOR_N_CONCURRENT_OVERRIDE" in contents
     assert "invalid EVOLVE_HARBOR_N_CONCURRENT_OVERRIDE" in contents
+
+
+def test_ahe_dsh_context_and_output_caps_align_across_phases() -> None:
+    expected = {"DSH_CONTEXT_WINDOW": "1000000", "DSH_MAX_TOKENS": "49152"}
+    for name in DSH_RECIPES:
+        recipe = _parsed_config(name)
+        evaluator_env = recipe["evaluator"]["agent_env"]
+        analyze_env = _operator_config(name, "analyze")["debugger"]["agent_env"]
+        mutate_env = _operator_config(name, "mutate")["agent_env"]
+        for environment in (evaluator_env, analyze_env, mutate_env):
+            assert {key: environment[key] for key in expected} == expected

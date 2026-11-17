@@ -55,6 +55,13 @@ def test_harbor_seed_carries_no_host_mutator() -> None:
         assert not (HARBOR / relative).exists(), relative
 
 
+def test_harbor_seed_uses_the_configured_openai_compatible_route() -> None:
+    agent = (HARBOR / "agent.py").read_text()
+    assert '"DSH_PROVIDER": "evolve-openai"' in agent
+    assert '"OPENAI_API_KEY": self._env("OPENAI_API_KEY", "")' in agent
+    assert '"OPENAI_BASE_URL": self._env("OPENAI_BASE_URL", "")' in agent
+
+
 def test_harbor_seed_stages_the_runtime_image() -> None:
     agent = (HARBOR / "agent.py").read_text()
     assert "DSH_RUNTIME_IMAGE" in agent
@@ -237,3 +244,30 @@ def test_recipes_select_their_seed_variant() -> None:
     hyperagents = yaml.safe_load((ROOT / "recipes" / "hyperagents_dsh" / "evolve.yaml").read_text())
     assert ahe["target"]["seed"] == "builtin-dsh-harbor"
     assert hyperagents["target"]["seed"] == "builtin-dsh"
+
+
+def test_compaction_policy_is_pinned_in_frozen_overlays() -> None:
+    overlays = (
+        HARBOR / "runners/compositions/rollout.base.cordis.yml",
+        ROOT / "containers/mutate-dsh/headless.mutate.cordis.yml",
+        ROOT / "containers/mutate-dsh/headless.analyst.cordis.yml",
+    )
+    expected = (
+        "name: '@deepseek-ai/dsh-compaction-basic'",
+        "headroomTokens: 16384",
+        "maxTokens: 16384",
+        "thresholdRatio: 0.85",
+        "retainRatio: 0.10",
+    )
+    for overlay in overlays:
+        content = overlay.read_text()
+        start = content.index("- id: compaction-basic")
+        end = content.find("\n- id:", start + 1)
+        row = content[start:] if end < 0 else content[start:end]
+        for value in expected:
+            assert value in row, f"{overlay}: missing {value}"
+        assert "DSH_CONTEXT_WINDOW" in content
+        assert "DSH_MAX_TOKENS" in content
+        assert "defaultContextWindow:" in content
+        if overlay.name == "rollout.base.cordis.yml":
+            assert "defaultMaxTokens:" in content

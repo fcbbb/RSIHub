@@ -1,13 +1,14 @@
-# Built-in DeepSeek Harness (dsh) Target — harbor variant
+# Built-in DeepSeek Harness (dsh) Target — installed-agent variant
 
 This target runs [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
 — a Node.js, plugin-composed agent harness — as the candidate. The evolvable
 content is dsh's own agent profile; the harness pieces ship alongside it,
 excluded from the mutable surface by the recipe.
 
-It is the seed used by `ahe_dsh`, where every non-candidate stage (mutate and
-debugger) runs inside the `evolve-mutate-dsh` image with `dsh --profile
-headless`. This variant therefore carries no host-side mutator. Its sibling
+It is the seed used by `ahe_dsh`: DeepSWE v1.1 candidate trials run through
+Pier, while the non-candidate stages (mutate and debugger) run in Harbor using
+the `evolve-mutate-dsh` image with `dsh --profile headless`. This variant
+therefore carries no host-side mutator. Its sibling
 `seeds/dsh` is the legacy target used by `hyperagents_dsh`: same evolvable
 profile, but rollouts go through a host-side dsh Python SDK and a `docker exec`
 bridge, and mutate runs locally. The two seeds are independent (the engine does
@@ -36,8 +37,8 @@ Never add npm dependencies. The runtime is staged at
 
 Harness-side (in `surface.exclude`, candidates cannot edit):
 
-- `agent.py` — the Harbor candidate adapter. It is a
-  `BaseInstalledAgent`, exactly like Harbor's Codex and MiniSWE agents:
+- `agent.py` — the candidate adapter. It implements the installed-agent
+  contract for Pier trials and retains Harbor compatibility:
   `install()` stages `@deepseek-ai/dsh` into the task container under
   `/opt/evolve-dsh` (plus its own Node only when the task image lacks Node 22+),
   and `run()` executes `runners/sdk_minimal_run.mjs` **inside that container**.
@@ -50,7 +51,7 @@ Harness-side (in `surface.exclude`, candidates cannot edit):
   - `sdk_minimal_run.mjs` — the in-container one-shot JSON-RPC driver
     (`initialize` → `session/prompt` → wait for `idle` → `session/wait` →
     `shutdown`).
-  - `compositions/rollout.base.cordis.yml` — frozen Harbor seams: local
+  - `compositions/rollout.base.cordis.yml` — frozen rollout seams: local
     `terminal-bash`/`persistent-bash`, `danger-full-access` sandbox (the task
     container is the sandbox), and the pinned model/credential route.
   - `candidate_overlay.py` — materializes `profile.cordis.yml` as a `--patch`
@@ -116,8 +117,8 @@ tree in place or rebuilding a tag cannot silently replay an old payload.
 `prepare-runtime.sh` fail if the tag no longer resolves to the reviewed image.
 
 Model routing follows the workspace's frozen identity: `OPENAI_BASE_URL` /
-`OPENAI_API_KEY` are mapped onto dsh's `DEEPSEEK_BASE_URL` / `DEEPSEEK_API_KEY`
-for the candidate run. The mutate and debugger stages are container-side
+`OPENAI_API_KEY` feed dsh's `evolve-openai` OpenAI-compatible route for the
+candidate run. The mutate and debugger stages are container-side
 headless runs configured in `recipes/ahe_dsh/evolve.yaml`; nothing in this seed
 needs a host Node runtime or the dsh Python SDK.
 
@@ -126,3 +127,8 @@ Optional restricted-network compensations (all no-ops when unset):
 cannot reach github), `DSH_CONTAINER_APT_MIRROR`, `DSH_CONTAINER_PIP_INDEX`,
 and `DSH_CONTAINER_PROXY`. None of them touch scoring. Never commit credentials
 under `target/`.
+
+Compaction is pinned in the frozen rollout composition and the mutate/analyst headless overlays, not in the candidate-editable profile. The shared policy uses `headroomTokens=16384`, summary `maxTokens=16384`, `thresholdRatio=0.85`, and `retainRatio=0.10`. Recipes set `DSH_CONTEXT_WINDOW` and `DSH_MAX_TOKENS` for each DSH role so the SDK request, model metadata, and compaction budget agree.
+
+
+The shared headless overlays and rollout overlay pin DSH compaction to `headroomTokens=16384`, `maxTokens=16384`, `thresholdRatio=0.85`, and `retainRatio=0.10`. Main model context and output caps come from `DSH_CONTEXT_WINDOW` and `DSH_MAX_TOKENS` in each recipe; the image builder keeps the frozen mutate and analyst overlays aligned.

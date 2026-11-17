@@ -12,20 +12,40 @@
 # are chosen there too, so this patch only pins runtime defaults
 # that must not drift with an evolved candidate profile:
 #   - sandbox stays danger-full-access: the task container IS the sandbox
-#   - the DeepSeek adapter reads credentials from the injected env
+#   - the OpenAI-compatible adapter reads credentials from the injected env
 #
 # Runtime variables (injected by the in-container driver):
-#   DSH_MODEL / DSH_CONTEXT_WINDOW / DEEPSEEK_API_KEY / DEEPSEEK_BASE_URL
+#   DSH_MODEL / DSH_CONTEXT_WINDOW / OPENAI_API_KEY / OPENAI_BASE_URL
 
 - id: sandbox-policy
   config:
     mode: danger-full-access
     workspaceRoot: !!js process.cwd()
 
-- id: llm-deepseek
+- id: compaction-basic
+  name: '@deepseek-ai/dsh-compaction-basic'
   config:
-    apiKeyEnv: DEEPSEEK_API_KEY
-    streamIdleTimeoutMs: 600000
-    models:
-      - id: !!js process.env.DSH_MODEL ?? 'deepseek-v4-flash'
-        contextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW ?? 1000000)
+    headroomTokens: 16384
+    maxTokens: 16384
+    thresholdRatio: 0.85
+    retainRatio: 0.10
+
+- id: llm-deepseek
+  disabled: true
+
+- insert:
+    - id: llm-pi-ai
+      name: '@deepseek-ai/dsh-llm-pi-ai'
+      config:
+        providers:
+          evolve-openai:
+            apiKeyEnv: OPENAI_API_KEY
+            api: openai-completions
+            baseURL: !!js process.env.OPENAI_BASE_URL
+            streamIdleTimeoutMs: 600000
+            defaultContextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW ?? 131072)
+            defaultMaxTokens: !!js Number(process.env.DSH_MAX_TOKENS ?? 32768)
+            models:
+              - id: !!js process.env.DSH_MODEL ?? 'deepseek-v4-flash-0731'
+                contextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW ?? 131072)
+                maxTokens: !!js Number(process.env.DSH_MAX_TOKENS ?? 32768)

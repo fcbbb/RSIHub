@@ -13,6 +13,11 @@ PINS = dict(
     for line in (ROOT / "containers/runtime-versions.env").read_text().splitlines()
     if line and not line.startswith("#")
 )
+COMPACTION_IMAGES = dict(
+    line.split("=", 1)
+    for line in (ROOT / "containers/mutate-dsh/compaction-images.env").read_text().splitlines()
+    if line and not line.startswith("#")
+)
 
 
 def test_codex_standalone_defaults_match_manifest():
@@ -59,4 +64,9 @@ def test_shipped_mutation_image_tags_match_their_role():
         if image.startswith("evolve-mutate-app:"):
             assert image == PINS["MINISWE_IMAGE"]
         if image.startswith("evolve-mutate-dsh:"):
-            assert image == PINS["DSH_MUTATE_IMAGE"]
+            assert image in {
+                PINS["DSH_MUTATE_IMAGE"],
+                *COMPACTION_IMAGES,
+            }
+    assert COMPACTION_IMAGES["evolve-mutate-dsh:20261117-dsh021rc5-musl-cwfix-compaction"] == PINS["DSH_MUTATE_IMAGE"]
+    assert COMPACTION_IMAGES["evolve-mutate-dsh:20261117-dsh021rc5-cwfix-compaction"] == "evolve-mutate-dsh:20261104-dsh021rc5"

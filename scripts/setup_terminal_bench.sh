@@ -92,7 +92,12 @@ if [[ $RUNTIME_KIND == local ]]; then
 else
   # Resolve once and probe the immutable local image, not its version label.
   IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null || true)
-  if [[ -z $IMAGE_ID || $REBUILD == --rebuild ]]; then
+  if [[ $RUNTIME_KIND == dsh && $IMAGE == *-compaction ]]; then
+    OVERLAY_ARGS=("$IMAGE")
+    [[ $REBUILD != --rebuild ]] || OVERLAY_ARGS+=(--rebuild)
+    "$ROOT/scripts/build_dsh_compaction_image.sh" "${OVERLAY_ARGS[@]}"
+    IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$IMAGE")
+  elif [[ -z $IMAGE_ID || $REBUILD == --rebuild ]]; then
     docker build "${BUILD_ARGS[@]}" -t "$IMAGE" "$IMAGE_CONTEXT"
     IMAGE_ID=$(docker image inspect --format '{{.Id}}' "$IMAGE")
   fi

@@ -41,13 +41,17 @@ if name == "docker":
     if args[:1] == ["build"]:
         image = args[args.index("-t") + 1]
         images[image] = next(
-            a.split("=", 1)[1]
-            for a in args
-            if a.startswith(("CODEX_VERSION=", "MINISWE_VERSION=", "DSH_VERSION="))
+            (a.split("=", 1)[1] for a in args
+             if a.startswith(("CODEX_VERSION=", "MINISWE_VERSION=", "DSH_VERSION="))),
+            "0.2.1-rc.5",
         )
         state.write_text(json.dumps(images))
         raise SystemExit(0)
     if args[:1] == ["run"]:
+        if "--entrypoint" in args and args[args.index("--entrypoint") + 1] == "/bin/cat":
+            source = Path(os.environ["FAKE_REPO_ROOT"]) / "containers" / "mutate-dsh" / Path(args[-1]).name
+            sys.stdout.write(source.read_text())
+            raise SystemExit(0)
         version = next(iter(images.values()))
         if "mini-swe-agent" in args[-1]:
             print(version)
@@ -105,6 +109,7 @@ def _environment(tmp_path: Path, **values: str) -> tuple[dict[str, str], Path]:
             "EVOLVE_ASSET_DIR": str(tmp_path / "assets"),
             "SETUP_CALLS": str(calls),
             "DOCKER_STATE": str(tmp_path / "docker-images"),
+            "FAKE_REPO_ROOT": str(ROOT),
             **values,
         }
     )
@@ -228,16 +233,25 @@ def test_setup_prepares_dataset_only_for_hyperagents_dsh(tmp_path: Path) -> None
     assert "./scripts/run_recipe_demo.sh hyperagents_dsh" in result.stdout
 
 
-def test_setup_builds_dsh_image_for_ahe_dsh(tmp_path: Path) -> None:
-    result, calls = _run(tmp_path, "ahe_dsh")
+def test_setup_builds_dsh_compaction_overlay_for_ahe_dsh(tmp_path: Path) -> None:
+    environment, calls_path = _environment(tmp_path)
+    Path(environment["DOCKER_STATE"]).write_text(json.dumps({
+        "evolve-mutate-dsh:20261113-dsh021rc5-musl": "0.2.1-rc.5",
+    }))
+    result = subprocess.run(
+        ["bash", str(SCRIPT), "ahe_dsh"], cwd=ROOT, env=environment,
+        text=True, capture_output=True, check=False,
+    )
 
     assert result.returncode == 0, result.stderr
+    calls = _calls(calls_path)
     build = next(call for call in calls if call[:2] == ["docker", "build"])
-    assert "DSH_VERSION=0.2.1-rc.5" in build
-    assert build[build.index("-t") + 1] == "evolve-mutate-dsh:20261113-dsh021rc5-musl"
+    assert "BASE_IMAGE=evolve-mutate-dsh:20261113-dsh021rc5-musl" in build
+    assert build[build.index("-t") + 1] == "evolve-mutate-dsh:20261117-dsh021rc5-musl-cwfix-compaction"
     assert str(ROOT / "containers" / "mutate-dsh") in build[-1]
-    probe = next(call for call in calls if call[:2] == ["docker", "run"])
+    probe = next(call for call in calls if call[:2] == ["docker", "run"] and "dsh --version" in call[-1])
     assert "dsh --version" in probe[-1]
+    assert "./scripts/run_recipe_demo.sh ahe_dsh" in result.stdout
     assert "./scripts/run_recipe_demo.sh ahe_dsh" in result.stdout
 
 

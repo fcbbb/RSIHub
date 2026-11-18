@@ -157,6 +157,42 @@ def test_ahe_groups_all_rollouts_per_task_and_prioritizes_failures() -> None:
     assert [job.task_name for job in module._build_jobs(cases, max_tasks=1)] == ["task-b"]
 
 
+def test_ahe_failure_selection_round_robins_distinct_signatures() -> None:
+    module = _module()
+    cases = []
+    for task, signature in (("task-a", "device"), ("task-b", "network"), ("task-c", "device")):
+        case = _case(task, "failed", 0.0, task=task)
+        case["failure_category"] = signature
+        cases.append(case)
+
+    jobs = module._build_jobs(cases, max_tasks=2)
+
+    assert {job.signature for job in jobs} == {"device", "network"}
+    assert len(jobs) == 2
+
+
+@pytest.mark.parametrize(
+    ("response", "expected"),
+    [
+        (
+            "**ROOT CAUSE:**\nThe tool response was truncated before the test failure.\n\n## GENERAL LESSON\nCheck output bounds.",
+            "ROOT CAUSE: The tool response was truncated before the test failure.",
+        ),
+        (
+            "FAILURE POINT:\n\nThe verifier timed out while compiling the fixture.",
+            "FAILURE POINT: The verifier timed out while compiling the fixture.",
+        ),
+        (
+            "### ROOT CAUSE\nThe command ran from the wrong directory.\n**WHAT SHOULD HAVE BEEN DONE:**\nUse the repository root.",
+            "ROOT CAUSE: The command ran from the wrong directory.",
+        ),
+        ("ROOT CAUSE:\n\n## GENERAL LESSON\nNo diagnosis supplied.", None),
+    ],
+)
+def test_ahe_diagnosis_extracts_multiline_sections_without_next_heading(response, expected) -> None:
+    assert _module()._diagnosis_line(response) == expected
+
+
 def test_ahe_excludes_infrastructure_only_tasks_and_applies_pass_threshold() -> None:
     module = _module()
     jobs = module._build_jobs(

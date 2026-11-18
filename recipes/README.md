@@ -35,7 +35,9 @@ into the agent-phase allowlist at run time with
 `ahe_dsh_multibench` combines those three sources, groups splits by source and
 repository, and uses an equal-source macro-average score.
 The setup script downloads and verifies the source dataset and builds only the
-selected recipe's pinned MiniSWE, Codex, or dsh-headless mutation-agent image:
+selected recipe's pinned MiniSWE, Codex, or dsh-headless mutation-agent image.
+The local `ahe_dsh` recipe also supports DeepSWE v1.1 through Pier; see its
+README for the local setup and run instructions:
 
 ```bash
 ./scripts/setup_terminal_bench.sh gepa
@@ -44,8 +46,6 @@ selected recipe's pinned MiniSWE, Codex, or dsh-headless mutation-agent image:
 ./scripts/run_recipe_demo.sh hyperagents_tbench_full
 ./scripts/setup_terminal_bench.sh hyperagents_codex_tbench_full
 ./scripts/run_recipe_demo.sh hyperagents_codex_tbench_full
-./scripts/setup_terminal_bench.sh ahe_dsh
-./scripts/run_recipe_demo.sh ahe_dsh
 ```
 
 The ReviewBench recipe reuses the dsh image but takes a local dataset path:

@@ -52,7 +52,7 @@ def _case(tmp_path: Path, *, genid: str = "1", parent: str = "0"):
     (analysis / "overview.md").write_text("# AHE Debugger Overview\n\nOVERVIEW ROOT CAUSE\n")
     detail = analysis / "detail"
     detail.mkdir()
-    (detail / "task-a.md").write_text("DETAIL BODY MUST STAY ON DISK\n")
+    (detail / "task-a.md").write_text("DETAIL BODY MUST STAY ON DISK; verifier reports an assertion mismatch.\n")
     (analysis / "change_evaluation.json").write_text(
         json.dumps(
             {
@@ -64,7 +64,15 @@ def _case(tmp_path: Path, *, genid: str = "1", parent: str = "0"):
     )
     evidence = run_dir / "analyze" / "evidence"
     evidence.mkdir()
-    (evidence / "overview.json").write_text(json.dumps({"cases": [{"task_name": "task-a"}]}))
+    (evidence / "overview.json").write_text(
+        json.dumps(
+            {
+                "cases": [{"task_name": "task-a"}],
+                "failure_signatures": ["benchmark_failure"],
+                "selected_tasks": [{"task_name": "task-a", "signature": "benchmark_failure", "mode": "debug"}],
+            }
+        )
+    )
     workspace.mkdir(exist_ok=True)
     (workspace / "archive.jsonl").write_text('{"genid":"0","score":0,"sentinel":"ARCHIVE BODY MUST STAY ON DISK"}\n')
     handoff = workspace / "artifacts" / "generations" / parent / "handoff.md"
@@ -87,7 +95,17 @@ def _case(tmp_path: Path, *, genid: str = "1", parent: str = "0"):
 def _manifest(genid: str = "1", parent: str = "0") -> dict:
     del parent
     return {
-        "iteration": int(genid),
+        "iteration": int(genid) if genid.isdigit() else genid,
+        "hypothesis": "A retry on the active execution path may recover transient tool errors.",
+        "disconfirming_observation": "The same task fails with a deterministic assertion after a successful tool response.",
+        "evidence_reviews": [
+            {
+                "task_name": "task-a",
+                "signature": "benchmark_failure",
+                "evidence_quote": "DETAIL BODY MUST STAY ON DISK",
+                "finding": "The report contains an assertion mismatch; this does not prove a retry defect.",
+            }
+        ],
         "changes": [
             {
                 "id": "chg-1",
@@ -155,7 +173,10 @@ def test_ahe_prompt_uses_official_decisions_and_required_manifest(tmp_path: Path
         "Benchmark-specific configurations are inactive",
     ):
         assert forbidden not in prompt
-    assert "Evidence reading order" in prompt
+    assert "Evidence review before decisions or edits" in prompt
+    assert prompt.index("read at least one matching per-task detail") < prompt.index("Only then choose KEEP")
+    assert "falsifiable hypothesis" in prompt
+    assert "target/.ahe-change-manifest.json" in prompt
     assert "OVERVIEW ROOT CAUSE" not in prompt
     assert "ATTRIBUTION BODY MUST STAY ON DISK" not in prompt
     assert "ARCHIVE BODY MUST STAY ON DISK" not in prompt
@@ -210,7 +231,21 @@ def test_ahe_prompt_describes_dsh_candidate_when_profile_present(tmp_path: Path)
     assert "Improve the Codex harness" not in prompt
 
 
-def test_ahe_prompt_does_not_require_readable_evidence_bodies(tmp_path: Path) -> None:
+def test_dsh_prompt_includes_pinned_plugin_api_contract(tmp_path: Path) -> None:
+    module = _module()
+    checkout, _run_dir, ctx = _case(tmp_path)
+    (checkout / "target" / "profile.cordis.yml").write_text("[]\n")
+    prompt = module.build_prompt(checkout, "fallback", ctx)
+
+    assert "Pinned DSH plugin API" in prompt
+    assert "dsh-tools" in prompt and "0.2.1-rc.5" in prompt
+    assert "ctx.tools.register" in prompt
+    assert "output.render(args, value)" in " ".join(prompt.split())
+    assert "agent/pre-step" in prompt
+    assert "Do not import Cordis or DSH packages" in prompt
+
+
+def test_ahe_prompt_requires_evidence_review_without_inlining_bodies(tmp_path: Path) -> None:
     module = _module()
     checkout, _run_dir, ctx = _case(tmp_path)
     (ctx.run_dir / "analyze/analysis/overview.md").write_text("")
@@ -220,6 +255,35 @@ def test_ahe_prompt_does_not_require_readable_evidence_bodies(tmp_path: Path) ->
 
     assert "/app/task/workspace/runs/gen-1/analyze/analysis/overview.md" in prompt
     assert "/app/task/workspace/runs/gen-1/analyze/analysis/change_evaluation.json" in prompt
+    assert "read at least one matching per-task detail" in prompt
+    assert "DETAIL BODY MUST STAY ON DISK" not in prompt
+
+
+def test_ahe_evidence_audit_requires_each_signature_and_matching_detail_quote(tmp_path: Path) -> None:
+    module = _module()
+    _checkout, _run_dir, ctx = _case(tmp_path)
+    overview_path = ctx.run_dir / "analyze/evidence/overview.json"
+    overview = json.loads(overview_path.read_text())
+    overview["failure_signatures"].append("timeout")
+    overview["selected_tasks"].append({"task_name": "task-b", "signature": "timeout", "mode": "debug"})
+    overview_path.write_text(json.dumps(overview))
+    detail = ctx.run_dir / "analyze/analysis/detail/task-b.md"
+    detail.write_text("TIMEOUT EVIDENCE: command exceeded the task deadline.\n")
+    manifest = _manifest()
+
+    with pytest.raises(ValueError, match="each selected failure signature"):
+        module._validate_reviewed_evidence(manifest, ctx)
+
+    manifest["evidence_reviews"].append(
+        {
+            "task_name": "task-b",
+            "signature": "timeout",
+            "evidence_quote": "not a quote from the report",
+            "finding": "the attempt exceeded its deadline",
+        }
+    )
+    with pytest.raises(ValueError, match="quote is not present"):
+        module._validate_reviewed_evidence(manifest, ctx)
 
 
 def test_ahe_mutate_requires_valid_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -254,8 +318,9 @@ def test_ahe_invalid_manifest_fails_after_preserving_artifacts(tmp_path: Path, m
     monkeypatch.setattr(module, "run_agent", fake_run_agent)
     with pytest.raises(ValueError, match="manifest file"):
         module.AheMutate().mutate(checkout, "fallback", ctx)
-    for name in ("output.txt", "patch.diff", "changed.json", "surface-check.json", "usage.json"):
+    for name in ("output.txt", "usage.json", "manifest_validation_error.txt"):
         assert (run_dir / "mutate" / name).is_file()
+    assert not (run_dir / "mutate" / "patch.diff").exists()
 
 
 def test_ahe_prompt_points_to_prior_change_without_inlining_it(tmp_path: Path) -> None:

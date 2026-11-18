@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -35,15 +36,15 @@ Improve the configured candidate harness; do not solve a benchmark task directly
 Optimize pass@1. Treat debugger reports as evidence, not proof. Follow the
 workspace contract and make changes only within the declared mutable surface.
 
-For this generation:
-1. Read the debugger overview and relevant task details first.
-2. Read change_evaluation.json and the previous change context.
-3. Decide KEEP, REVISE, or ROLLBACK + PIVOT before editing.
-4. Cite specific debugger tasks and distinguish evidence from causal inference.
-5. Identify the active execution path, then choose the harness component matching the root cause.
-6. If the same failure survived repeated changes at one component, pivot levels.
+For this generation, use this order and do not edit before completing the evidence review:
+1. Read the debugger overview and identify every selected failure signature.
+2. For each distinct failure signature, read at least one selected task detail. Cite an exact, meaningful quote from that file; inspect raw trace evidence when the detail is incomplete or conflicting.
+3. Read change_evaluation.json and the previous change context.
+4. Write a falsifiable hypothesis that separates observed facts from inferred cause, names an expected benefit and regression risk, and states what evidence would disprove it.
+5. Only after steps 1-4, decide KEEP, REVISE, or ROLLBACK + PIVOT. If the details do not support a change, preserve the harness and state why.
+6. Identify the active execution path and choose the harness component matching the evidence.
 7. Make one coherent change within the declared mutable surface and run proportionate checks.
-8. Write one official-style change manifest to the required control file.
+8. Write the structured evidence review and change manifest to the required control file.
 
 Files on the active execution path become the deployed benchmark-solving harness.
 Evolution artifacts and instructions in this prompt are not available inside benchmark episodes.
@@ -65,15 +66,15 @@ CODEX_AHE_PROMPT = """# Agentic Harness Engineering
 Improve the Codex harness under `target/`; do not solve a benchmark task
 directly. Optimize pass@1. Treat debugger reports as evidence, not proof.
 
-For this generation:
-1. Read the debugger overview and relevant task details first.
-2. Read change_evaluation.json and the previous change context.
-3. Decide KEEP, REVISE, or ROLLBACK + PIVOT before editing.
-4. Cite specific debugger tasks and distinguish evidence from causal inference.
-5. Choose the harness component matching the root cause.
-6. If the same failure survived repeated changes at one component, pivot levels.
-7. Make one coherent target/** change and run proportionate checks.
-8. Write one official-style change manifest to the required control file.
+For this generation, use this order and do not edit before completing the evidence review:
+1. Read the debugger overview and identify every selected failure signature.
+2. For each distinct failure signature, read at least one selected task detail. Cite an exact, meaningful quote from that file; inspect raw trace evidence when the detail is incomplete or conflicting.
+3. Read change_evaluation.json and the previous change context.
+4. Write a falsifiable hypothesis that separates observed facts from inferred cause, names an expected benefit and regression risk, and states what evidence would disprove it.
+5. Only after steps 1-4, decide KEEP, REVISE, or ROLLBACK + PIVOT. If the details do not support a change, preserve the harness and state why.
+6. Identify the active execution path and choose the harness component matching the evidence.
+7. Make one coherent change within the declared mutable surface and run proportionate checks.
+8. Write the structured evidence review and change manifest to the required control file.
 
 Files under `target/` become the deployed benchmark-solving harness. The
 evolvable surface includes the runtime prompt, skills, Codex configuration, and
@@ -100,15 +101,15 @@ Improve the DeepSeek Harness (dsh) candidate under `target/`; do not solve a
 benchmark task directly. Optimize pass@1. Treat debugger reports as evidence,
 not proof. Make changes only within the declared mutable surface.
 
-For this generation:
-1. Read the debugger overview and relevant task details first.
-2. Read change_evaluation.json and the previous change context.
-3. Decide KEEP, REVISE, or ROLLBACK + PIVOT before editing.
-4. Cite specific debugger tasks and distinguish evidence from causal inference.
-5. Choose the candidate harness component matching the root cause.
-6. If the same failure survived repeated changes at one component, pivot levels.
-7. Make one coherent target/** change and run proportionate checks.
-8. Write one official-style change manifest to the required control file.
+For this generation, use this order and do not edit before completing the evidence review:
+1. Read the debugger overview and identify every selected failure signature.
+2. For each distinct failure signature, read at least one selected task detail. Cite an exact, meaningful quote from that file; inspect raw trace evidence when the detail is incomplete or conflicting.
+3. Read change_evaluation.json and the previous change context.
+4. Write a falsifiable hypothesis that separates observed facts from inferred cause, names an expected benefit and regression risk, and states what evidence would disprove it.
+5. Only after steps 1-4, decide KEEP, REVISE, or ROLLBACK + PIVOT. If the details do not support a change, preserve the harness and state why.
+6. Identify the active execution path and choose the harness component matching the evidence.
+7. Make one coherent change within the declared mutable surface and run proportionate checks.
+8. Write the structured evidence review and change manifest to the required control file.
 
 `target/profile.cordis.yml` is a patch over the fixed `sdk-minimal` dsh bundle.
 The evolvable surface is the candidate profile, `target/plugins/`, and
@@ -141,6 +142,23 @@ packages):
   staged at `/opt/evolve-dsh/state/candidate`; a local plugin should resolve sibling
   paths from `import.meta.url` rather than assuming the process cwd.
 
+Pinned DSH plugin API:
+- The configured image pins dsh-plugin-manager, dsh-tools, dsh-agent, and
+  dsh-agent-loop at version 0.2.1-rc.5. A candidate plugin exports name,
+  optional inject, and apply(ctx, config); seed-probe is the local example.
+- Register tools with ctx.tools.register({name, description, parameters, output,
+  execute}). Use JSON Schema for parameters and output.schema; output.render(args,
+  value) returns content blocks. execute(args, exec) should honor exec.signal.
+  Registration returns a disposer for the tool.
+- The supported schema subset is type, oneOf, properties, required,
+  additionalProperties, items, enum, and const, with annotation fields.
+- Runtime hooks in this image include system-prompt/assemble, agent/request,
+  agent/pre-step, agent/disposed, workspace/session-activity, and
+  workspace/session-stop. Check each hook's scope and payload; preserve waterfall
+  next() behavior and dispose owned resources.
+- Do not import Cordis or DSH packages, add npm dependencies, or rely on Host
+  inspector tools from a candidate plugin. Use capabilities injected through ctx.
+
 Never edit `target/agent.py`, `target/dsh_trajectory.py`, or
 `target/runners/**`: those are frozen Harbor/rollout seams. Keep the profile
 valid YAML and keep plugin imports resolvable. If you edit runtime
@@ -157,6 +175,16 @@ endpoints, or resource limits.
 
 MANIFEST_TEMPLATE = {
     "iteration": 1,
+    "hypothesis": "If ... then ... because the reviewed task evidence shows ...",
+    "disconfirming_observation": "A concrete observation that would disprove the hypothesis",
+    "evidence_reviews": [
+        {
+            "task_name": "task-name",
+            "signature": "failure-signature",
+            "evidence_quote": "exact text copied from the selected detail file",
+            "finding": "what the quote supports and what it does not prove",
+        }
+    ],
     "changes": [
         {
             "id": "chg-1",
@@ -200,7 +228,73 @@ def _extract_manifest(output: str, genid: str) -> dict[str, Any]:
         raise ValueError("AHE manifest iteration does not match operator context")
     if not isinstance(payload.get("changes"), list) or not payload["changes"]:
         raise ValueError("AHE manifest changes must be a nonempty list")
+    for field in ("hypothesis", "disconfirming_observation"):
+        if not isinstance(payload.get(field), str) or not payload[field].strip():
+            raise ValueError(f"AHE manifest {field} must be nonempty text")
+    reviews = payload.get("evidence_reviews")
+    if not isinstance(reviews, list):
+        raise ValueError("AHE manifest evidence_reviews must be a list")
+    for review in reviews:
+        if not isinstance(review, dict) or any(
+            not isinstance(review.get(field), str) or not review[field].strip()
+            for field in ("task_name", "signature", "evidence_quote", "finding")
+        ):
+            raise ValueError("AHE manifest evidence review fields must be nonempty text")
     return payload
+
+
+def _safe_task_name(task_name: str) -> str:
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,199}", task_name):
+        return task_name
+    return "task-" + hashlib.sha256(task_name.encode()).hexdigest()
+
+
+def _validate_reviewed_evidence(manifest: dict[str, Any], ctx: OperatorContext) -> dict[str, Any]:
+    overview_path = ctx.run_dir / "analyze" / "evidence" / "overview.json"
+    try:
+        overview = json.loads(overview_path.read_text())
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("AHE evidence overview is missing or invalid") from exc
+    if not isinstance(overview, dict):
+        raise ValueError("AHE evidence overview must be a JSON object")
+    required = {
+        str(signature)
+        for signature in overview.get("failure_signatures", [])
+        if isinstance(signature, str) and signature
+    }
+    selected = {
+        (str(item.get("task_name")), str(item.get("signature")))
+        for item in overview.get("selected_tasks", [])
+        if isinstance(item, dict) and item.get("mode") == "debug"
+    }
+    detail_dir = ctx.run_dir / "analyze" / "analysis" / "detail"
+    covered: set[str] = set()
+    reviewed_tasks: set[str] = set()
+    for review in manifest["evidence_reviews"]:
+        task_name = review["task_name"]
+        signature = review["signature"]
+        if (task_name, signature) not in selected:
+            raise ValueError(f"AHE evidence review does not match a selected task: {task_name}")
+        detail_path = detail_dir / f"{_safe_task_name(task_name)}.md"
+        try:
+            detail_path.resolve().relative_to(detail_dir.resolve())
+            detail = detail_path.read_text()
+        except (OSError, ValueError, UnicodeDecodeError) as exc:
+            raise ValueError(f"AHE selected task detail is missing or unsafe: {task_name}") from exc
+        quote = review["evidence_quote"]
+        if len(quote) < 12 or quote not in detail:
+            raise ValueError(f"AHE evidence quote is not present in selected task detail: {task_name}")
+        covered.add(signature)
+        reviewed_tasks.add(task_name)
+    missing = sorted(required - covered)
+    if missing:
+        raise ValueError("AHE evidence review must cover each selected failure signature: " + ", ".join(missing))
+    return {
+        "required_failure_signatures": sorted(required),
+        "covered_failure_signatures": sorted(covered),
+        "reviewed_tasks": sorted(reviewed_tasks),
+        "review_count": len(manifest["evidence_reviews"]),
+    }
 
 
 def _read_manifest_file(checkout: Path, genid: str) -> dict[str, Any]:
@@ -259,13 +353,13 @@ def build_prompt(checkout: Path, observation: str, ctx: OperatorContext) -> str:
     )
     return (
         f"{target_prompt.rstrip()}\n\n"
-        "# Evidence reading order\n\n"
-        f"1. Read `{overview}`.\n"
-        f"2. Read `{attribution}` and decide KEEP, REVISE, or ROLLBACK + PIVOT.\n"
-        f"3. Read only the relevant per-task reports under `{details}`.\n"
-        f"4. {prior_change}\n"
-        f"5. Use `{cases}` and raw rollout artifacts under `{rollout}` only to resolve missing or conflicting evidence.\n"
-        "6. Edit the candidate and write the required AHE change manifest.\n\n"
+        "# Evidence review before decisions or edits\n\n"
+        f"1. Read `{overview}` and list every distinct selected failure signature.\n"
+        f"2. For each signature, read at least one matching per-task detail under `{details}`. An exact quote must appear in the final evidence review; the validator checks that the quote exists in that detail.\n"
+        f"3. Use `{cases}` and raw rollout artifacts under `{rollout}` to resolve gaps or conflicts; do not claim evidence you did not inspect.\n"
+        f"4. Read `{attribution}` and {prior_change}\n"
+        "5. Record the observed evidence, falsifiable hypothesis, expected benefit, regression risk, and a disconfirming observation. Only then choose KEEP, REVISE, or ROLLBACK + PIVOT. If no selected failures exist, use an empty evidence_reviews list and do not invent failure evidence.\n"
+        "6. Make any candidate edit only after that review.\n\n"
         "# Evidence Locations\n\n"
         f"Repository: {repository}\n"
         f"Feedback bundle: {current_run / 'feedback'}\n"
@@ -295,11 +389,19 @@ class AheMutate(MutateOperator):
             raise SystemExit(exc.returncode)
 
         manifest_error: ValueError | None = None
+        evidence_audit: dict[str, Any] = {}
         try:
             manifest = _read_manifest_file(checkout, ctx.genid)
+            evidence_audit = _validate_reviewed_evidence(manifest, ctx)
         except ValueError as exc:
             manifest = None
             manifest_error = exc
+        (out / "output.txt").write_text(agent_run.output)
+        usage = _safe_usage(agent_run.usage)
+        _write_json(out / "usage.json", usage)
+        if manifest_error is not None:
+            (out / "manifest_validation_error.txt").write_text(str(manifest_error) + "\n")
+            raise manifest_error
 
         patch = create_candidate_patch(
             checkout=checkout,
@@ -314,10 +416,9 @@ class AheMutate(MutateOperator):
         _write_json(out / "changed.json", patch.changed_paths)
         _write_json(out / "surface-check.json", patch.surface_report)
         _write_json(out / "usage.json", usage)
-        if manifest_error is not None:
-            raise manifest_error
         assert manifest is not None
         _write_json(out / "change_manifest.json", manifest)
+        _write_json(out / "evidence_audit.json", evidence_audit)
         notes = [
             "operator: ahe",
             f"runner: {runner_name(ctx)}",

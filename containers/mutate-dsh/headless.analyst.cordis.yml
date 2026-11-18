@@ -35,7 +35,7 @@
     apiKeyEnv: DEEPSEEK_API_KEY
     streamIdleTimeoutMs: 600000
     # dsh's own default is 256000, which the gateway rejects when the model's
-    # max_model_len is 131072. Cap below that; DSH_MAX_TOKENS may override.
+    # Fallback only; AHE recipes inject the selected endpoint context and output caps.
     maxTokens: !!js Number(process.env.DSH_MAX_TOKENS ?? 32768)
     defaultContextWindow: !!js Number(process.env.DSH_CONTEXT_WINDOW ?? 131072)
     models:

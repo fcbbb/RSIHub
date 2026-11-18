@@ -2,7 +2,7 @@ experiment:
   id: ahe_dsh_sweatlas
   max_generations: 5
   target_score: null
-  children_per_gen: 1
+  children_per_gen: 2
   mode: driver
   seed: 0
 
@@ -23,7 +23,7 @@ surface:
 
 operators:
   select:
-    operator: ahe_latest
+    operator: ahe_champion
     timeout_s: 600
     config: {}
   rollout:
@@ -97,13 +97,10 @@ evaluator:
   anchor: {final: true, every_rounds: 0}
   max_retries: 1
   benchmark_timeout_is_zero: true
-  # Tolerate sparse infrastructure failures (for example a task verifier
-  # exceeding its own 600 s cap) instead of voiding the whole round. Missing
-  # trials are scored as zero because classify_evaluation divides by
-  # tasks_per_round, so partial coverage can only understate a candidate.
-  # ReviewBench is the exception: its macro-F1 identity needs every trial, so
-  # reward_schema=reviewbench still requires partial_floor: 1.0 (enforced in
-  # evolve.workspace).
+  # Keep scoreable evidence for diagnosis when infrastructure fails,
+  # including verifier timeouts. Incomplete rounds receive no aggregate score
+  # and cannot become parents; a later explicit run may retry them. ReviewBench
+  # still needs all rewards to define its macro-F1 aggregate.
   partial_floor: 0.8
   # The verifier runs mutation testing plus one LLM call per rubric and one
   # manifest check; task.toml budgets 900 s, which is tight for 13 calls.

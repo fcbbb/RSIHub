@@ -136,7 +136,7 @@ def test_supported_recipes_use_harbor_and_method_mutate() -> None:
             "record": "jsonl",
         },
         "ahe_dsh": {
-            "select": "ahe_latest",
+            "select": "ahe_champion",
             "rollout": "parent_evaluation",
             "analyze": "ahe",
             "mutate": "ahe",
@@ -145,7 +145,7 @@ def test_supported_recipes_use_harbor_and_method_mutate() -> None:
             "record": "jsonl",
         },
         "ahe_dsh_reviewbench": {
-            "select": "ahe_latest",
+            "select": "ahe_champion",
             "rollout": "parent_evaluation",
             "analyze": "ahe",
             "mutate": "ahe",
@@ -154,7 +154,7 @@ def test_supported_recipes_use_harbor_and_method_mutate() -> None:
             "record": "jsonl",
         },
         "ahe_dsh_reviewbench_fast": {
-            "select": "ahe_latest",
+            "select": "ahe_champion",
             "rollout": "parent_evaluation",
             "analyze": "ahe",
             "mutate": "ahe",
@@ -163,7 +163,7 @@ def test_supported_recipes_use_harbor_and_method_mutate() -> None:
             "record": "jsonl",
         },
         "ahe_dsh_sweatlas": {
-            "select": "ahe_latest",
+            "select": "ahe_champion",
             "rollout": "parent_evaluation",
             "analyze": "ahe",
             "mutate": "ahe",
@@ -172,7 +172,7 @@ def test_supported_recipes_use_harbor_and_method_mutate() -> None:
             "record": "jsonl",
         },
         "ahe_dsh_deepswe": {
-            "select": "ahe_latest",
+            "select": "ahe_champion",
             "rollout": "parent_evaluation",
             "analyze": "ahe",
             "mutate": "ahe",
@@ -181,7 +181,7 @@ def test_supported_recipes_use_harbor_and_method_mutate() -> None:
             "record": "jsonl",
         },
         "ahe_dsh_multibench": {
-            "select": "ahe_latest",
+            "select": "ahe_champion",
             "rollout": "parent_evaluation",
             "analyze": "ahe",
             "mutate": "ahe",

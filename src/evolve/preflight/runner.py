@@ -119,7 +119,19 @@ def run_preflight(
         )
     completed.append(_passed_check("evaluation_contract"))
 
-    tools = ["docker", "harbor"] if runtime.engine == "harbor" else []
+    benchmark_runner = str(evaluator.get("runner", "harbor"))
+    if benchmark_runner not in {"harbor", "pier"}:
+        return _failed_result(
+            mode,
+            destination,
+            completed,
+            "dependency_tools",
+            PreflightFailureCategory.CONFIGURATION_INVALID,
+            "evaluator.runner must be harbor or pier",
+            source_environment,
+            runtime,
+        )
+    tools = ["docker", benchmark_runner] if runtime.engine == "harbor" else []
     if runtime.config.candidate is not None:
         tools.append(runtime.config.candidate.variant)
     for tool in tools:

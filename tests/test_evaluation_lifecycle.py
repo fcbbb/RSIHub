@@ -144,7 +144,7 @@ def test_genesis_sealed_anchor_failure_stops_before_first_generation(tmp_path: P
     assert git(workspace, "tag", "--list", "gen/1") == ""
 
 
-def test_candidate_infrastructure_failure_is_recorded_without_automatic_retry(
+def test_candidate_infrastructure_failure_retries_on_later_run(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -158,17 +158,17 @@ def test_candidate_infrastructure_failure_is_recorded_without_automatic_retry(
     monkeypatch.setenv("EVOLVE_AGENT_COMMAND", smoke_agent_command())
 
     run(RunOptions(workspace, max_generations=1, children_per_gen=1))
-
     run(RunOptions(workspace, max_generations=1, children_per_gen=1))
 
     attempts = _evaluation_events(workspace, "1")
-    assert [event["attempt"] for event in attempts] == [1]
+    assert [event["attempt"] for event in attempts] == [1, 2]
     assert attempts[0]["outcome"] == "infrastructure_failed"
     assert attempts[0]["retry_of"] is None
+    assert attempts[1]["outcome"] == "benchmark_complete"
+    assert attempts[1]["retry_of"] is None
     assert "source_attempts" not in attempts[0]
     assert "repaired_tasks" not in attempts[0]
-    assert rows_by_genid(workspace)["1"]["attempt"] == 1
-    assert rows_by_genid(workspace)["1"]["status"] == "infrastructure_failed"
+    assert rows_by_genid(workspace)["1"]["status"] == "complete"
 
 
 def test_agent_prepare_uses_development_only_then_continuous_seal_compares_baseline(tmp_path: Path) -> None:
@@ -191,3 +191,43 @@ def test_agent_prepare_uses_development_only_then_continuous_seal_compares_basel
     assert result["final"] == result["baseline"]
     assert seal_research(workspace)["final"]["sealed"] == "already complete"
     assert [e["purpose"] for e in _evaluation_events(workspace, "0")] == ["genesis", "anchor"]
+
+
+def test_final_anchor_uses_ahe_champion_selector(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    import evolve.driver as driver
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    candidates = [
+        {"genid": "0", "tag": "gen/0", "score": 0.8, "evals": []},
+        {"genid": "1", "tag": "gen/1", "score": 0.9, "evals": []},
+    ]
+    evaluated: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(driver, "evaluator_anchor", lambda _workspace: {"final": True})
+    monkeypatch.setattr(driver, "load_manifest", lambda _path: {})
+    monkeypatch.setattr(driver, "selected_task_names", lambda _manifest, _split: ["sealed-task"])
+    monkeypatch.setattr(driver, "ArchiveView", lambda _workspace: SimpleNamespace(valid_parents=lambda: candidates))
+    monkeypatch.setattr(driver, "best_row", lambda _workspace: candidates[1])
+    monkeypatch.setattr(driver, "add_worktree", lambda *_args: None)
+    monkeypatch.setattr(driver, "remove_worktree", lambda *_args: None)
+    monkeypatch.setattr(driver, "operator_timeout", lambda *_args: 60)
+    monkeypatch.setattr(driver, "_run_operator_guarded", lambda **_kwargs: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(driver, "_load_parents", lambda _run_dir: (["0"], None))
+    monkeypatch.setattr(
+        driver,
+        "_evaluate_once",
+        lambda _workspace, tag, _genid, **metadata: evaluated.append((tag, metadata["metadata"])),
+    )
+
+    _maybe_final_anchor(
+        workspace,
+        1,
+        "exp",
+        {"select": {"operator": "ahe_champion", "timeout_s": 60, "config": {}}},
+    )
+
+    assert evaluated[0][0] == "gen/0"
+    assert evaluated[0][1]["selected_by"] == "ahe_champion"
+    assert evaluated[0][1]["selection_artifact"] == "runs/finalize-1/select/parents.json"

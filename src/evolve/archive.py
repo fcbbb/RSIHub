@@ -462,7 +462,7 @@ def _can_replace_stamped(current: dict[str, Any], event: dict[str, Any]) -> bool
     ):
         return True
     return (
-        evaluation_status(current) in {"infra_failed", "infrastructure_failed"}
+        evaluation_status(current) in {"infra_failed", "infrastructure_failed", "partial"}
         and event.get(MECHANISM_EVAL_FIELD) is True
         and event.get("outcome") in CANONICAL_OUTCOMES
         and all(event.get(key) == current.get(key) for key in ("generation", "candidate_commit", "purpose"))

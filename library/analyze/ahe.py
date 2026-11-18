@@ -265,6 +265,7 @@ class TaskAnalysisJob:
     n_fail: int
     n_timeout: int
     mode: str
+    signature: str
 
 
 @dataclass(frozen=True)
@@ -285,6 +286,43 @@ def _case_outcome(case: Case, pass_threshold: float) -> str:
     return outcome
 
 
+def _failure_signature(cases: list[Case], n_timeout: int) -> str:
+    if n_timeout:
+        return "timeout"
+    for case in cases:
+        category = case.get("failure_category")
+        exception = case.get("exception")
+        exception_type = case.get("exception_type")
+        if not exception_type and isinstance(exception, dict):
+            exception_type = exception.get("type")
+        label = category or exception_type
+        if label:
+            return re.sub(r"[^A-Za-z0-9_.:-]+", "_", str(label)).strip("_").lower()
+        verifier = str(case.get("verifier_output") or "")
+        match = re.search(r"(?:FAILED|ERROR)\s+([^\s:]+)", verifier)
+        if match:
+            return "test:" + match.group(1)
+    return "benchmark_failure"
+
+
+def _round_robin_by_signature(jobs: list[TaskAnalysisJob], limit: int) -> list[TaskAnalysisJob]:
+    buckets: dict[str, list[TaskAnalysisJob]] = {}
+    for job in jobs:
+        buckets.setdefault(job.signature, []).append(job)
+    for group in buckets.values():
+        group.sort(key=lambda job: (-(job.n_fail + job.n_timeout), job.task_name))
+    selected: list[TaskAnalysisJob] = []
+    while len(selected) < limit:
+        progressed = False
+        for signature in sorted(buckets):
+            if buckets[signature] and len(selected) < limit:
+                selected.append(buckets[signature].pop(0))
+                progressed = True
+        if not progressed:
+            break
+    return selected
+
+
 def _build_jobs(cases: list[Case], max_tasks: int, pass_threshold: float = 1.0) -> list[TaskAnalysisJob]:
     grouped: dict[str, list[Case]] = {}
     for case in cases:
@@ -303,6 +341,8 @@ def _build_jobs(cases: list[Case], max_tasks: int, pass_threshold: float = 1.0) 
         n_pass = sum(case.get("outcome") == "passed" for case in comparable_cases)
         n_timeout = sum(case.get("outcome") == "timeout" for case in comparable_cases)
         n_fail = len(comparable_cases) - n_pass - n_timeout
+        mode = "debug" if n_fail or n_timeout else "summary"
+        signature = _failure_signature(comparable_cases, n_timeout) if mode == "debug" else "successful_rollout"
         jobs.append(
             TaskAnalysisJob(
                 task_name=task_name,
@@ -310,11 +350,14 @@ def _build_jobs(cases: list[Case], max_tasks: int, pass_threshold: float = 1.0) 
                 n_pass=n_pass,
                 n_fail=n_fail,
                 n_timeout=n_timeout,
-                mode="debug" if n_fail or n_timeout else "summary",
+                mode=mode,
+                signature=signature,
             )
         )
-    jobs.sort(key=lambda job: (job.mode == "summary", -(job.n_fail + job.n_timeout), job.task_name))
-    return jobs[:max_tasks]
+    failures = _round_robin_by_signature([job for job in jobs if job.mode == "debug"], max_tasks)
+    remaining = max_tasks - len(failures)
+    summaries = sorted((job for job in jobs if job.mode == "summary"), key=lambda job: job.task_name)
+    return [*failures, *summaries[:remaining]]
 
 
 _DEBUG_K1 = """You are the AHE LLM debugger. Analyze this failed or timed-out rollout for {task_name}.
@@ -626,6 +669,16 @@ def _overview(cases: list[Case], jobs: list[TaskAnalysisJob], error: str | None)
         "observed": len(cases),
         "selected": sum(len(job.cases) for job in jobs),
         "tasks": len(jobs),
+        "failure_signatures": sorted({job.signature for job in jobs if job.mode == "debug"}),
+        "selected_tasks": [
+            {
+                "task_name": job.task_name,
+                "signature": job.signature,
+                "mode": job.mode,
+                "detail_path": f"analyze/analysis/detail/{_safe_task_name(job.task_name)}.md",
+            }
+            for job in jobs
+        ],
         "outcomes": _outcome_counts(cases),
         "mean_reward": round(sum(rewards) / len(rewards), 6) if rewards else None,
         "cases": [
@@ -854,13 +907,46 @@ def _archive_analysis(ctx: OperatorContext) -> Case:
     }
 
 
-def _diagnosis_line(response: str) -> str:
-    lines = [line.strip() for line in response.splitlines() if line.strip()]
-    for heading in ("ROOT CAUSE:", "FAILURE POINT:"):
-        for line in lines:
-            if line.upper().startswith(heading) and line[len(heading) :].strip():
-                return line
-    return lines[0] if lines else "(empty debugger response)"
+def _diagnosis_line(response: str) -> str | None:
+    section_headings = {
+        "WHAT SHOULD HAVE BEEN DONE",
+        "GENERAL LESSON",
+        "PASS VS FAIL",
+        "KEY STRATEGY",
+        "SUCCESS FACTORS",
+        "REUSABLE PATTERN",
+    }
+    placeholders = {"n/a", "na", "none", "unknown", "not provided", "not available"}
+
+    def clean(line: str) -> str:
+        value = re.sub(r"^\s*(?:#{1,6}\s*|[-*+]\s*)", "", line).strip()
+        value = re.sub(r"\*\*([^*]+)\*\*", r"\1", value)
+        return re.sub(r"^[* _`>]+|[* _`>]+$", "", value)
+
+    lines = response.splitlines()
+    for index, raw in enumerate(lines):
+        cleaned = clean(raw)
+        match = re.match(r"^(ROOT CAUSE|FAILURE POINT)\s*:?\s*(.*)$", cleaned, re.IGNORECASE)
+        if not match:
+            continue
+        body = [match.group(2).strip()]
+        for following in lines[index + 1 :]:
+            if re.match(r"^\s{0,3}#{1,6}\s+", following):
+                break
+            candidate = clean(following)
+            if not candidate:
+                continue
+            upper = candidate.upper().rstrip(": ")
+            if upper in section_headings or (candidate.endswith(":") and len(candidate) <= 120):
+                break
+            if candidate.lower().strip(" .") in placeholders:
+                continue
+            body.append(candidate)
+        text = " ".join(part for part in body if part).strip()
+        if text and text.lower().strip(" .") not in placeholders:
+            label = "ROOT CAUSE" if match.group(1).upper() == "ROOT CAUSE" else "FAILURE POINT"
+            return f"{label}: {text}"
+    return None
 
 
 def _reports(root: Path, results: list[DebuggerResult], archive_analysis: Case) -> tuple[str, list[str]]:
@@ -883,7 +969,7 @@ def _reports(root: Path, results: list[DebuggerResult], archive_analysis: Case) 
         ]
         detail = (
             f"# AHE Debugger Detail: {job.task_name}\n\n"
-            f"- Pass: {job.n_pass}\n- Fail: {job.n_fail}\n- Timeout: {job.n_timeout}\n"
+            f"- Pass: {job.n_pass}\n- Fail: {job.n_fail}\n- Timeout: {job.n_timeout}\n- Failure signature: {job.signature}\n"
             f"- Traces: {', '.join(labels)}\n\n"
             f"## LLM debugger response\n\n{result.response}\n\n"
             f"## Failing verifier evidence\n\n{json.dumps(failing_verifier, indent=2)}\n\n"
@@ -894,7 +980,7 @@ def _reports(root: Path, results: list[DebuggerResult], archive_analysis: Case) 
         workspace_relative = f"runs/{root.parent.name}/{relative}"
         details.append(
             f"# Detail: {job.task_name}\n\n"
-            f"- Pass: {job.n_pass}\n- Fail: {job.n_fail}\n- Timeout: {job.n_timeout}\n"
+            f"- Pass: {job.n_pass}\n- Fail: {job.n_fail}\n- Timeout: {job.n_timeout}\n- Failure signature: {job.signature}\n"
             f"- Traces: {', '.join(labels)}\n"
             f"- Full bounded evidence: `{workspace_relative}`\n\n"
             f"## LLM debugger response\n\n{result.response}\n\n"
@@ -906,7 +992,12 @@ def _reports(root: Path, results: list[DebuggerResult], archive_analysis: Case) 
         lines.extend([f"## {title}", ""])
         matches = [result for result in results if result.job.mode == mode]
         lines.extend(
-            [f"- **{result.job.task_name}**: {_diagnosis_line(result.response)}" for result in matches] or ["- None"]
+            [
+                f"- **{result.job.task_name}** [{result.job.signature}]: "
+                + (_diagnosis_line(result.response) or "UNPARSED: inspect the full detail below.")
+                for result in matches
+            ]
+            or ["- None"]
         )
         lines.append("")
     best = archive_analysis.get("best_ever")
@@ -962,6 +1053,10 @@ class AheAnalyze(AnalyzeOperator):
         summary = {key: value for key, value in overview.items() if key != "cases"}
         summary["debugger_usd"] = round(sum(float(result.usage.get("usd") or 0) for result in results), 6)
         summary["debugger_errors"] = sum(result.error is not None for result in results)
+        summary["debugger_invalid_diagnoses"] = sum(
+            result.error is None and result.job.mode == "debug" and _diagnosis_line(result.response) is None
+            for result in results
+        )
         return AnalyzeResult(summary=summary, artifacts=[*ARTIFACTS, *detail_artifacts])
 
 

@@ -2,7 +2,7 @@ experiment:
   id: ahe_dsh
   max_generations: 10
   target_score: null
-  children_per_gen: 1
+  children_per_gen: 2
   mode: driver
   seed: 0
 
@@ -23,7 +23,7 @@ surface:
 
 operators:
   select:
-    operator: ahe_latest
+    operator: ahe_champion
     timeout_s: 600
     config: {}
   rollout:

@@ -17,7 +17,7 @@
  *   DSH_DBIN              path to dsh lib/bin.js
  *   DSH_PATCHES           colon-separated --patch files, applied in order
  *   DSH_CWD               session working directory (task container cwd)
- *   DSH_PROVIDER          provider route (default deepseek-official)
+ *   DSH_PROVIDER          provider route (default evolve-openai)
  *   DSH_MODEL             model id (from the evaluator's pinned model)
  *   DSH_CONTEXT_WINDOW    optional adapter fallback capacity
  *   DSH_SESSION_ID        session id (default one-shot uuid)
@@ -34,8 +34,8 @@ import { randomUUID } from "node:crypto";
 const env = process.env;
 const dbin = env.DSH_DBIN;
 const cwd = env.DSH_CWD || "/app";
-const model = env.DSH_MODEL || "deepseek-v4-flash";
-const provider = env.DSH_PROVIDER || "deepseek-official";
+const model = env.DSH_MODEL || "deepseek-v4-flash-0731";
+const provider = env.DSH_PROVIDER || "evolve-openai";
 const sessionId = env.DSH_SESSION_ID || `task-${randomUUID()}`;
 const taskFile = env.DSH_TASK_FILE;
 const finalFile = env.DSH_FINAL_FILE;
@@ -198,7 +198,7 @@ child.on("exit", (code, signal) => {
 });
 
 try {
-  await request("initialize", { cwd, provider, model, maxTokens: Number(env.DSH_MAX_TOKENS || "49152") });
+  await request("initialize", { cwd, provider, model, maxTokens: Number(env.DSH_MAX_TOKENS || "32768") });
   await request("session/prompt", {
     sessionId,
     contentBlocks: [{ type: "text", text: instruction }],

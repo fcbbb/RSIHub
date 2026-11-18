@@ -46,7 +46,7 @@ decision (and usually a demolition pass) instead of silent sprawl.
 | `composition/materialize.py` | 200 | selected operator freezing, runtime-helper materialization, and provenance manifest entries |
 | `composition/recipe.py` | 300 | strict built-in and path recipe resolution, operator binding validation, and aggregated diagnostics |
 | `config.py` | 225 | read/render `evolve.yaml`, including evaluator repetition and inline runtime normalization |
-| `driver.py` | 1800 | the generation sequencer: orchestrates baseline eval, verbs + operators (incl. novelty, self-modification admission gates, sealed anchors); validates operator outputs; computes verified_fixes; audit quarantine; doctor repair |
+| `driver.py` | 1800 | generation sequencer; retries scoreless partial candidates, records selector decisions, and applies configured history-aware selection to the final sealed anchor |
 | `doctor.py` | 250 | read-only local/experiment preflight profiles and persisted diagnostic receipts |
 | `evaluator_doctor.py` | 275 | frozen evaluator contract checks for local runtime preparation, task assets, and model-free smoke probes |
 | `evaluation/__init__.py` | 75 | typed evaluation identity, contract, and result facade |
@@ -55,7 +55,7 @@ decision (and usually a demolition pass) instead of silent sprawl.
 | `evaluation/evidence.py` | 175 | evaluator-output reading, validation, and conversion into canonical trial results |
 | `evaluation/execution.py` | 625 | clean-checkout canonical evaluation: preflight gate, run plan, interrupted-round resume discovery, tree assertion, lifecycle, artifacts, and score parsing |
 | `evaluation/legacy.py` | 275 | read-only task-set identity compatibility for pre-contract workspaces |
-| `evaluation/results.py` | 300 | evaluation result types, task or equal-source scoring, outcome classification, and persisted score components |
+| `evaluation/results.py` | 350 | evaluation result types, task/equal-source scoring, scoreless partial-evidence diagnostics, outcome classification, and persisted score components |
 | `evaluation/run_plan.py` | 100 | authoritative per-attempt task, trial-count, commit, and runtime plan |
 | `execution_runtime/__init__.py` | 25 | execution-runtime package facade |
 | `execution_runtime/command.py` | 50 | shell-facing runtime endpoint resolver |
@@ -135,10 +135,10 @@ each workspace, immutable there because it sits outside the mutable surface
 | `frozen/__init__.py` | 50 | the frozen-ring definition (litmus + two homes: contract/gate vs the evaluator) — the canonical anchor a contributor reads |
 | `frozen/public_artifacts.py` | 125 | versioned public artifact and aggregate feedback declarations |
 | `frozen/config.py` | 400 | dependency-free declarative operator config schemas, normalization, inspection descriptions, and path-aware errors |
-| `frozen/interfaces.py` | 375 | operator ABCs, registry, result schemas, and strict operator payload validation |
+| `frozen/interfaces.py` | 400 | operator ABCs, registry, result schemas, strict payload validation, and finite-JSON selector rationale |
 | `frozen/sdk.py` | 350 | Python operator entrypoint and file-contract IO; no library algorithm policy |
 
-Total `src/evolve/` budget: **27775 lines**. The budget admits the read-only experiment viewer,
+Total `src/evolve/` budget: **27850 lines**.
 the explicit content-backed
 evaluation-contract boundaries, the opt-in in-place Harbor runtime, and the redacted trace-analysis
 boundary between rollout and feedback assembly; if the mechanism wants to

@@ -43,7 +43,9 @@ def _write_fake_uv(bin_dir: Path) -> None:
 def test_harbor_evaluator_uses_locked_workspace_runtime() -> None:
     text = _eval_sh("harbor", "fixture")
 
-    assert "PYTHONPATH" not in text
+    assert text.count('PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}" "$PIER_BIN" "$@"') == 2
+    assert "export PYTHONPATH=" not in text
+    assert text.index("PIER_BIN=${EVOLVE_PIER_BIN") < text.index("PYTHONPATH=")
     assert text.count('--python "$EVOLVE_FRAMEWORK_PYTHON"') == 5
     assert 'python "$PWD/.evolve/launch_splits.py"' in text
     assert 'harbor "$@"' in text

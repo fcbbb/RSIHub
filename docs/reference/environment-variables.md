@@ -155,7 +155,7 @@ export EVOLVE_ASSET_ROOT=/srv/evolve-assets
 ./scripts/fetch_dataset.sh swe-bench-verified@1.0 swe-bench
 
 DATASET_PATH=/srv/evolve-assets/swe-bench \
-  ./scripts/run_recipe_demo.sh ahe_dsh
+  ./scripts/run_recipe_demo.sh ahe
 ```
 
 `DATASET_PATH` is passed to `evolve init --dataset` unchanged; the launcher

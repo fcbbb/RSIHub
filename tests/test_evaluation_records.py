@@ -126,7 +126,7 @@ def test_extra_trial_evidence_cannot_inflate_the_score() -> None:
     assert record.reason == "unexpected extra trial evidence"
 
 
-def test_partial_floor_accepts_sparse_infrastructure_failures_conservatively() -> None:
+def test_partial_floor_never_promotes_sparse_infrastructure_failures() -> None:
     trials = tuple(
         TrialResult(f"task-{index}", 0, Outcome.BENCHMARK_COMPLETE, 1.0, "benchmark") for index in range(48)
     ) + (
@@ -141,10 +141,19 @@ def test_partial_floor_accepts_sparse_infrastructure_failures_conservatively() -
         partial_floor=0.8,
     )
 
-    assert record.outcome is Outcome.BENCHMARK_COMPLETE
-    assert record.score == 0.96
-    assert record.selection_eligible is True
-    assert record.reason == "partial evidence accepted: 48/50 scoreable trials"
+    assert record.outcome is Outcome.INFRASTRUCTURE_FAILED
+    assert record.status == "partial"
+    assert record.score is None
+    assert record.selection_eligible is False
+    assert record.reason == "partial evidence retained for diagnosis: 48/50 scoreable trials"
+    assert record.diagnostics == {
+        "partial_evidence": {
+            "scoreable_trials": 48,
+            "expected_trials": 50,
+            "coverage": 0.96,
+            "diagnostic_mean_reward": 1.0,
+        }
+    }
     assert [trial.outcome for trial in record.trials[-2:]] == [
         Outcome.INFRASTRUCTURE_FAILED,
         Outcome.INFRASTRUCTURE_FAILED,
@@ -162,6 +171,7 @@ def test_partial_floor_rejects_systemically_missing_evidence() -> None:
     )
 
     assert record.outcome is Outcome.INFRASTRUCTURE_FAILED
+    assert record.status == "partial"
     assert record.score is None
 
 

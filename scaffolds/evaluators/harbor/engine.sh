@@ -1,5 +1,10 @@
 # harbor evaluator template
 . evaluator/eval.env
+case "${EVOLVE_BENCHMARK_RUNNER:-harbor}" in
+  harbor|pier) ;;
+  *) printf 'unsupported benchmark runner: %s\n' "$EVOLVE_BENCHMARK_RUNNER" >&2; exit 3 ;;
+esac
+export EVOLVE_BENCHMARK_RUNNER
 if [ "${EVOLVE_EXECUTION_BACKEND:-}" = "local" ]; then
   case "${EVOLVE_HARBOR_ENVIRONMENT:-}" in
     *:LocalEnvironment) ;;
@@ -321,7 +326,11 @@ if [ -n "${EVOLVE_TASK_LIMIT:-}" ]; then
     fi
   fi
 fi
-set -- "$@" --agent "$EVOLVE_HARBOR_AGENT"
+if [ "$EVOLVE_BENCHMARK_RUNNER" = pier ]; then
+  set -- "$@" --agent-import-path "$EVOLVE_HARBOR_AGENT"
+else
+  set -- "$@" --agent "$EVOLVE_HARBOR_AGENT"
+fi
 # Benchmarks do not carry deployment endpoints.  Merge the run-specific model
 # host(s) into the agent-phase allowlist exactly as upstream Harbor runners do.
 for agent_allowed_host in ${EVOLVE_HARBOR_AGENT_ALLOWED_HOSTS:-}; do
@@ -341,15 +350,34 @@ if [ -f evaluator/agent.kwargs ]; then
   done < evaluator/agent.kwargs
 fi
 set -- "$@" --ae "EVOLVE_CANDIDATE_SOURCE=$PWD/target"
-set -- "$@" --mounts "$runtime_mounts"
+if [ "$EVOLVE_BENCHMARK_RUNNER" = pier ]; then
+  if [ -n "${EVOLVE_CANDIDATE_RUNTIME_MOUNTS_JSON:-}" ] || [ -n "${EVOLVE_UV_PYTHON_INSTALL_DIR:-}" ]; then
+    printf 'Pier runtime mounts require a trial-specific log mount plan; remove custom mounts for this recipe\n' >&2
+    printf 'infra_failed\n' > "$EVOLVE_RUN_DIR/status"
+    exit 3
+  fi
+else
+  set -- "$@" --mounts "$runtime_mounts"
+fi
 while IFS= read -r compose_overlay; do
+  if [ "$EVOLVE_BENCHMARK_RUNNER" = pier ]; then
+    printf 'Pier does not support extra Docker Compose overlays: %s\n' "$compose_overlay" >&2
+    printf 'infra_failed\n' > "$EVOLVE_RUN_DIR/status"
+    exit 3
+  fi
   set -- "$@" --extra-docker-compose "$compose_overlay"
 done < "$EVOLVE_RUN_DIR/candidate-runtime.compose-paths"
 if [ "${EVOLVE_HARBOR_CODEX_SUBSCRIPTION:-0}" != "1" ]; then
   for credential_name in OPENAI_API_KEY OPENAI_BASE_URL OPENAI_API_BASE; do
     eval "credential_value=\${$credential_name-}"
     if [ -n "$credential_value" ]; then
-      set -- "$@" --ae "$credential_name=$credential_value"
+      if [ "$credential_name" = OPENAI_API_KEY ]; then
+        # Let Harbor/Pier resolve the secret inside the task environment. This
+        # keeps the actual key out of the evaluator process argument list.
+        set -- "$@" --ae 'OPENAI_API_KEY=${OPENAI_API_KEY}'
+      else
+        set -- "$@" --ae "$credential_name=$credential_value"
+      fi
     fi
   done
 fi
@@ -390,7 +418,12 @@ if [ -n "$evaluator_runtime_env" ]; then
 fi
 if [ -f "$EVOLVE_RUN_DIR/runtime-agent.env" ]; then
   while IFS= read -r agent_entry || [ -n "$agent_entry" ]; do
-    [ -n "$agent_entry" ] && set -- "$@" --ae "$agent_entry"
+    if [ -n "$agent_entry" ]; then
+      case "$agent_entry" in
+        OPENAI_API_KEY=*) set -- "$@" --ae 'OPENAI_API_KEY=${OPENAI_API_KEY}' ;;
+        *) set -- "$@" --ae "$agent_entry" ;;
+      esac
+    fi
   done < "$EVOLVE_RUN_DIR/runtime-agent.env"
 fi
 if [ -f "$EVOLVE_RUN_DIR/runtime-verifier.env" ]; then
@@ -413,6 +446,11 @@ while IFS= read -r runtime_entry || [ -n "$runtime_entry" ]; do
   fi
 done < "$EVOLVE_RUN_DIR/candidate-runtime.env"
 if [ -n "${EVOLVE_CANDIDATE_SMOKE_MODE:-}" ]; then
+  if [ "$EVOLVE_BENCHMARK_RUNNER" = pier ]; then
+    printf 'Pier does not support install-only candidate smoke\n' >&2
+    printf 'infra_failed\n' > "$EVOLVE_RUN_DIR/status"
+    exit 3
+  fi
   set -- "$@" --install-only --ae "EVOLVE_CANDIDATE_SMOKE_MODE=$EVOLVE_CANDIDATE_SMOKE_MODE"
 fi
 if [ -n "${EVOLVE_HARBOR_MODEL:-}" ]; then
@@ -474,6 +512,27 @@ if [ "${resume_skip_harbor:-0}" = 1 ]; then
   # without launching Harbor again.
   printf 'resume: all planned trials already have final evidence\n' > "$EVOLVE_RUN_DIR/harbor.log"
   harbor_rc=0
+elif [ "$EVOLVE_BENCHMARK_RUNNER" = pier ]; then
+  PIER_BIN=${EVOLVE_PIER_BIN:-$(command -v pier || true)}
+  [ -n "$PIER_BIN" ] && [ -x "$PIER_BIN" ] || {
+    printf 'Pier executable is missing; set EVOLVE_PIER_BIN or add pier to PATH\n' >&2
+    printf 'infra_failed\n' > "$EVOLVE_RUN_DIR/status"
+    exit 3
+  }
+  if [ "${EVOLVE_LIVE_OUTPUT:-0}" = "1" ]; then
+    pier_fifo="$EVOLVE_RUN_DIR/.pier-live.fifo"
+    rm -f "$pier_fifo"
+    mkfifo "$pier_fifo"
+    tee "$EVOLVE_RUN_DIR/harbor.log" < "$pier_fifo" &
+    tee_pid=$!
+    PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}" "$PIER_BIN" "$@" > "$pier_fifo" 2>&1 || harbor_rc=$?
+    wait "$tee_pid" || true
+    rm -f "$pier_fifo"
+  else
+    PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}" "$PIER_BIN" "$@" > "$EVOLVE_RUN_DIR/harbor.log" 2>&1 || harbor_rc=$?
+  fi
+  "$EVOLVE_FRAMEWORK_PYTHON" evaluator/parse_score.py "$jobs_dir" "$EVOLVE_RUN_DIR" "$harbor_rc"
+  exit $?
 elif [ -n "${EVOLVE_CANDIDATE_SMOKE_MODE:-}" ]; then
   run_shared_uv run --project "$EVOLVE_WORKSPACE" --frozen \
     --python "$EVOLVE_FRAMEWORK_PYTHON" sh -c 'umask 077; exec "$@"' sh harbor "$@"

@@ -70,7 +70,6 @@ from .surface import check_paths, surface_patterns
 PENDING_GATE_RECORD_NOTE = "mechanism evaluation recorded before gate/record"
 TERMINAL_STATUSES = {
     "complete",
-    "partial",
     "invalid_proposal",
     "no_proposal",
     "operator_failed",
@@ -188,23 +187,66 @@ def _run_locked(options: RunOptions, workspace: Path) -> None:
                 _resume_tagged_child(workspace, exp_id, genid, parent, round_number, operators_config)
                 continue
             _run_child(workspace, exp_id, genid, parent, round_number, operators_config)
-    _maybe_final_anchor(workspace, options.max_generations)
+    _maybe_final_anchor(workspace, options.max_generations, exp_id, operators_config)
 
 
-def _maybe_final_anchor(workspace: Path, generation: int) -> None:
+def _maybe_final_anchor(
+    workspace: Path,
+    generation: int,
+    exp_id: str | None = None,
+    operators_config: dict[str, Any] | None = None,
+) -> None:
     if generation <= 0 or evaluator_anchor(workspace).get("final") is not True:
         return
     manifest = load_manifest(workspace / "evaluator" / "splits.json")
     if not selected_task_names(manifest, "sealed"):
         return
     candidates = ArchiveView(workspace).valid_parents()
-    candidate = best_row(workspace) or max(
+    if not candidates:
+        return
+    best = best_row(workspace)
+    fallback = best or max(
         candidates,
         key=lambda row: (generation_number(str(row.get("genid"))) or -1, str(row.get("genid"))),
-        default=None,
     )
-    if candidate is None:
-        return
+    selected_by = "best_row"
+    selection_artifact = None
+    select_block = (operators_config or {}).get("select")
+    if isinstance(select_block, dict) and select_block.get("operator") == "ahe_champion":
+        experiment = exp_id or experiment_id(workspace)
+        run_dir = workspace / "runs" / f"finalize-{generation}" / "select"
+        select_tag = str(fallback.get("tag") or "gen/0")
+        with tempfile.TemporaryDirectory(prefix=f"evolve-final-select-{generation}-") as tempdir:
+            checkout = Path(tempdir) / "checkout"
+            add_worktree(workspace, checkout, select_tag)
+            try:
+                result = _run_operator_guarded(
+                    name="select",
+                    checkout=checkout,
+                    workspace=workspace,
+                    exp_id=experiment,
+                    genid=f"final-{generation}",
+                    parent=None,
+                    run_dir=run_dir,
+                    config_block=_operator_config_block(operators_config or {}, "select"),
+                    timeout_s=operator_timeout(operators_config or {}, "select"),
+                    round_number=None,
+                )
+            finally:
+                remove_worktree(workspace, checkout)
+        if result.returncode != 0:
+            raise RuntimeError("final champion selection failed; sealed anchor was not run")
+        parents, error = _load_parents(run_dir)
+        if error is not None or not parents:
+            raise RuntimeError("final champion selection produced no valid parent; sealed anchor was not run")
+        selected_id = parents[0]
+        candidate = next((row for row in candidates if str(row.get("genid")) == selected_id), None)
+        if candidate is None:
+            raise RuntimeError(f"final champion selector chose an invalid parent: {selected_id}")
+        selected_by = "ahe_champion"
+        selection_artifact = f"runs/finalize-{generation}/select/parents.json"
+    else:
+        candidate = fallback
     if _has_complete_anchor(candidate):
         return
     genid = str(candidate["genid"])
@@ -220,6 +262,8 @@ def _maybe_final_anchor(workspace: Path, generation: int) -> None:
             "note": "sealed anchor evaluation; excluded from mutate feedback",
             "kind": "anchor",
             "round": generation,
+            "selected_by": selected_by,
+            **({"selection_artifact": selection_artifact} if selection_artifact else {}),
         },
         pending_gate_on_complete=False,
     )
@@ -522,7 +566,7 @@ def _resume_tagged_child(
     row = rows_by_genid(workspace).get(genid, {})
     needs_gate_record = genid in _evaluation_pending_gate_record_genids(workspace)
     canonical = row.get("outcome") in CANONICAL_OUTCOMES
-    if not canonical:
+    if not canonical or evaluation_status(row) == "partial":
         eval_child(workspace, genid, round_number=round_number)
         row = rows_by_genid(workspace).get(genid, {})
         needs_gate_record = genid in _evaluation_pending_gate_record_genids(workspace)
@@ -792,7 +836,7 @@ def eval_child(
     rows = rows_by_genid(workspace)
     row = rows.get(genid, {})
     status = evaluation_status(row)
-    if not force and round_number is None and row.get("outcome") in CANONICAL_OUTCOMES:
+    if not force and round_number is None and row.get("outcome") in CANONICAL_OUTCOMES and status != "partial":
         return None
     if force:
         kind = "forced_eval"

@@ -73,6 +73,14 @@ state available to mutators without adding a planner, diagnostic replay, or othe
 algorithmic stage. The publisher records provenance and explicit unavailability;
 it does not convert runtime observations into diagnoses or mutation recommendations.
 
+## AHE evaluation and selection
+
+AHE keeps pass@1 over the complete expected task set as the primary score. Partial trial evidence remains available for diagnosis, but an infrastructure failure, missing trial, or incomplete task set has no aggregate score and is not eligible for parent selection. A later explicit run can retry a tagged partial candidate; the earlier attempt stays in the append-only archive.
+
+The AHE selector compares valid parents on the same task-set hash and evaluator fingerprint using paired per-task rewards. It estimates a deterministic 95% bootstrap interval over task-level differences (and equal-source strata for the multibench recipe), promotes only when the candidate improves and the interval lower bound is above zero, and records P2P/F2P/P2F/F2F transitions and its decision rationale. This interval measures task-sample uncertainty; recipes still use one model trial per task, so it does not estimate within-task sampling variance. AHE recipes run two candidates per generation and seal the selected history-aware champion at the configured final anchor. Existing initialized workspaces retain their frozen operators and recipe settings.
+
+AHE diagnostics classify failure signatures, select examples across signatures, and require a mutate evidence review that quotes selected task details before allowing a candidate patch. The DSH mutate prompt includes the runtime-pinned plugin API contract; a separate offline smoke exercises tool registration, schema validation, execution, rendering, and disposal against the pinned images.
+
 ## Declarative operator configuration
 
 An operator owns one declarative `Config` schema. The schema is the single

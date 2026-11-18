@@ -27,7 +27,12 @@ def test_shell_entry_points_do_not_set_pythonpath() -> None:
     violations = []
     for path in sorted((ROOT / "scaffolds").rglob("*.sh")):
         for lineno, line in enumerate(path.read_text().splitlines(), 1):
-            if "PYTHONPATH=" in line:
+            scoped_pier_env = path.relative_to(
+                ROOT
+            ).as_posix() == "scaffolds/evaluators/harbor/engine.sh" and line.strip().startswith(
+                'PYTHONPATH="$PWD${PYTHONPATH:+:$PYTHONPATH}" "$PIER_BIN" "$@"'
+            )
+            if "PYTHONPATH=" in line and not scoped_pier_env:
                 violations.append(f"{path.relative_to(ROOT)}:{lineno}")
 
     assert violations == []

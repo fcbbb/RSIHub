@@ -21,10 +21,12 @@ CANONICAL_OUTCOMES = frozenset(outcome.value for outcome in Outcome)
 
 
 def evaluation_status(values: dict[str, Any]) -> str | None:
+    status = values.get("status")
+    if status == "partial":
+        return "partial"
     outcome = values.get("outcome")
     if outcome == Outcome.BENCHMARK_COMPLETE:
         return "complete"
-    status = values.get("status")
     return str(outcome or status) if outcome in CANONICAL_OUTCOMES or status is not None else None
 
 
@@ -113,7 +115,11 @@ class EvaluationRecord:
 
     @property
     def status(self) -> str:
-        return "complete" if self.outcome is Outcome.BENCHMARK_COMPLETE else self.outcome.value
+        if self.outcome is Outcome.BENCHMARK_COMPLETE:
+            return "complete"
+        if self.outcome is Outcome.INFRASTRUCTURE_FAILED:
+            return "partial"
+        return self.outcome.value
 
     @property
     def selection_eligible(self) -> bool:
@@ -191,6 +197,8 @@ def classify_evaluation(
     outcomes = tuple(effective_trial_outcome(trial) for trial in trials)
     if setup_outcome is not None:
         outcomes = (setup_outcome, *outcomes)
+    diagnostics = values.pop("diagnostics", None)
+    diagnostics = dict(diagnostics) if isinstance(diagnostics, dict) else {}
     scoreable = tuple(
         trial
         for trial in trials
@@ -198,6 +206,14 @@ def classify_evaluation(
         and trial.score_eligible(benchmark_timeout_is_zero=benchmark_timeout_is_zero)
     )
     coverage = len(scoreable) / expected_trials
+    if len(scoreable) < expected_trials:
+        partial_rewards = [float(trial.reward) for trial in scoreable if trial.reward is not None]
+        diagnostics["partial_evidence"] = {
+            "scoreable_trials": len(scoreable),
+            "expected_trials": expected_trials,
+            "coverage": coverage,
+            "diagnostic_mean_reward": sum(partial_rewards) / len(partial_rewards) if partial_rewards else None,
+        }
     if setup_outcome is Outcome.INFRASTRUCTURE_FAILED:
         outcome = Outcome.INFRASTRUCTURE_FAILED
         reason = setup_reason or "evaluation infrastructure failed"
@@ -212,20 +228,20 @@ def classify_evaluation(
         outcome, reason = Outcome.CANCELLED, setup_reason or "evaluation cancelled"
     elif len(trials) > expected_trials:
         outcome, reason = Outcome.INFRASTRUCTURE_FAILED, "unexpected extra trial evidence"
-    elif scoreable and coverage >= partial_floor:
+    elif len(scoreable) == expected_trials and len(trials) == expected_trials:
         outcome = Outcome.BENCHMARK_COMPLETE
-        reason = (
-            "all required trials are scoreable"
-            if len(scoreable) == expected_trials and len(trials) == expected_trials
-            else f"partial evidence accepted: {len(scoreable)}/{expected_trials} scoreable trials"
-        )
+        reason = "all required trials are scoreable"
     elif (
         Outcome.INFRASTRUCTURE_FAILED in outcomes
         or Outcome.MISSING in outcomes
         or not trials
         or len(trials) != expected_trials
     ):
-        outcome, reason = Outcome.INFRASTRUCTURE_FAILED, "insufficient scoreable trial evidence"
+        outcome = Outcome.INFRASTRUCTURE_FAILED
+        if scoreable and coverage >= partial_floor:
+            reason = f"partial evidence retained for diagnosis: {len(scoreable)}/{expected_trials} scoreable trials"
+        else:
+            reason = "insufficient scoreable trial evidence"
     else:
         outcome, reason = Outcome.TIMEOUT, "non-scoreable timeout"
     score_components: dict[str, float] | None = None
@@ -265,6 +281,7 @@ def classify_evaluation(
         score=score,
         scoreable_trials=len(scoreable),
         score_components=score_components,
+        diagnostics=diagnostics or None,
     )
 
 

@@ -292,6 +292,7 @@ def _write_files(
             max_retries=max_retries,
             reward_schema=str(evaluator.get("reward_schema", "scalar")),
             agent_allowed_hosts=_evaluator_agent_allowed_hosts(evaluator),
+            runner=str(evaluator.get("runner", "harbor")),
         ),
         "evaluator/agent.env": _agent_env(evaluator.get("agent_env")),
         "evaluator/verifier.env": _agent_env(evaluator.get("verifier_env")),
@@ -445,6 +446,8 @@ def _validate_evaluator_config(evaluator: dict[str, Any]) -> None:
     normalize_evaluator_config(evaluator)
     engine = str(evaluator.get("engine") or "")
     _evaluator_scaffold(engine, "engine.sh")
+    if evaluator.get("runner", "harbor") not in {"harbor", "pier"}:
+        raise ValueError("evaluator.runner must be harbor or pier")
     if engine == "harbor" and not evaluator.get("agent"):
         raise ValueError("evaluator.agent is required for harbor recipes")
     _evaluator_agent_allowed_hosts(evaluator)
@@ -807,9 +810,13 @@ def _eval_env(
     max_retries: int = 0,
     reward_schema: str = "scalar",
     agent_allowed_hosts: list[str] | None = None,
+    runner: str = "harbor",
 ) -> str:
+    if runner not in {"harbor", "pier"}:
+        raise ValueError("evaluator.runner must be harbor or pier")
     expected_trials = tasks_per_round * max(trials, 1)
     text = (
+        f"EVOLVE_BENCHMARK_RUNNER={runner}\n"
         f"EVOLVE_EVALUATOR_DATASET={dataset}\n"
         f"EVOLVE_HARBOR_TASKS={shlex.quote(dataset)}\n"
         f"EVOLVE_HARBOR_DATASET_MODE={shlex.quote(dataset_mode)}\n"

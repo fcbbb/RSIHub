@@ -90,8 +90,8 @@ directory instead of downloading again. Use it through the demo launcher or
 pass it to `evolve init` directly:
 
 ```bash
-DATASET_PATH=/srv/evolve-assets/swe-bench ./scripts/run_recipe_demo.sh ahe_dsh
-uv run --frozen evolve init ./runs/x --recipe ahe_dsh --dataset /srv/evolve-assets/swe-bench
+DATASET_PATH=/srv/evolve-assets/swe-bench ./scripts/run_recipe_demo.sh ahe
+uv run --frozen evolve init ./runs/x --recipe ahe --dataset /srv/evolve-assets/swe-bench
 ```
 
 The equivalent raw Harbor export is:

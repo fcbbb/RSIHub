@@ -133,6 +133,7 @@ class ReflectOperator(ABC):
 @dataclass(frozen=True)
 class SelectResult:
     parents: list[str]
+    decision: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -188,7 +189,17 @@ def validate_select_payload(payload: SelectResult | dict[str, Any]) -> dict[str,
     parents = data.get("parents")
     if not isinstance(parents, list) or not parents or not all(str(parent) for parent in parents):
         raise PayloadValidationError("parents", "parents must be a non-empty list")
-    return {"parents": [str(parent) for parent in parents]}
+    result = {"parents": [str(parent) for parent in parents]}
+    decision = data.get("decision")
+    if decision is not None:
+        if not isinstance(decision, dict):
+            raise PayloadValidationError("decision", "decision must be a JSON object")
+        try:
+            json.dumps(decision, allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise PayloadValidationError("decision", "decision must contain only finite JSON values") from exc
+        result["decision"] = decision
+    return result
 
 
 def validate_rollout_payload(payload: RolloutResult | dict[str, Any]) -> dict[str, Any]:

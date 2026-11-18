@@ -580,7 +580,7 @@ done
             "DSH_CWD": cwd,
             "DSH_PROVIDER": "evolve-openai",
             "DSH_MODEL": model,
-            "DSH_CONTEXT_WINDOW": self._env("DSH_CONTEXT_WINDOW", "1000000") or "1000000",
+            "DSH_CONTEXT_WINDOW": self._env("DSH_CONTEXT_WINDOW", "131072") or "131072",
             "DSH_MAX_TOKENS": self._env("DSH_MAX_TOKENS", "32768") or "32768",
             "DSH_SESSION_ID": (self.session_id or "task").replace("/", "_"),
             "DSH_HOME": f"{CONTAINER_LOGS}/dsh-home",

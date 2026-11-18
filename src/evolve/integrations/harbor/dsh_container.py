@@ -105,7 +105,7 @@ class DshContainerAgent(BaseAgent):
         env["DSH_HOME"] = DSH_HOME
         env["DSH_PERMISSION_MODE"] = str(self._role_config["permission_mode"])
         env["DSH_MODEL"] = self._model_id()
-        env.setdefault("DSH_CONTEXT_WINDOW", "1000000")
+        env.setdefault("DSH_CONTEXT_WINDOW", "131072")
         env.setdefault("DSH_TELEMETRY_DISABLED", "1")
 
         if "OPENAI_BASE_URL" not in env and "OPENAI_API_BASE" in env:

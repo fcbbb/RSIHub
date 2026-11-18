@@ -620,7 +620,7 @@ def test_harbor_evaluator_accepts_validated_runtime_concurrency_override() -> No
 
 
 def test_ahe_dsh_context_and_output_caps_align_across_phases() -> None:
-    expected = {"DSH_CONTEXT_WINDOW": "1000000", "DSH_MAX_TOKENS": "49152"}
+    expected = {"DSH_CONTEXT_WINDOW": "131072", "DSH_MAX_TOKENS": "32768"}
     for name in DSH_RECIPES:
         recipe = _parsed_config(name)
         evaluator_env = recipe["evaluator"]["agent_env"]

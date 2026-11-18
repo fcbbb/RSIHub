@@ -50,7 +50,7 @@ operators:
         environment: docker
         image: evolve-mutate-dsh:20261117-dsh021rc5-musl-cwfix-compaction
         agent_kwargs: {role: analyst, version: 0.2.1-rc.5}
-        agent_env: {DSH_CONTEXT_WINDOW: "1000000", DSH_MAX_TOKENS: "49152"}
+        agent_env: {DSH_CONTEXT_WINDOW: "131072", DSH_MAX_TOKENS: "32768"}
   mutate:
     operator: ahe
     timeout_s: 3600
@@ -64,7 +64,7 @@ operators:
       editable_roots: [target]
       prompt_path: target/profile.cordis.yml
       agent_kwargs: {role: mutate, version: 0.2.1-rc.5}
-      agent_env: {DSH_CONTEXT_WINDOW: "1000000", DSH_MAX_TOKENS: "49152"}
+      agent_env: {DSH_CONTEXT_WINDOW: "131072", DSH_MAX_TOKENS: "32768"}
       max_retries: 1
   validate:
     operator: node_check
@@ -113,7 +113,7 @@ evaluator:
   agent_allowed_hosts:
     - token-plan.cn-beijing.maas.aliyuncs.com
   agent_env:
-    DSH_CONTEXT_WINDOW: "1000000"
-    DSH_MAX_TOKENS: "49152"
+    DSH_CONTEXT_WINDOW: "131072"
+    DSH_MAX_TOKENS: "32768"
     DSH_TASK_TIMEOUT_SEC: "10800"
     DSH_RUNTIME_IMAGE: evolve-mutate-dsh:20261113-dsh021rc5-musl

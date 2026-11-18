@@ -1,0 +1,100 @@
+experiment:
+  # Five fixed DeepSWE tasks and two generations for fast harness iteration.
+  id: ahe_dsh_deepswe_fast
+  max_generations: 2
+  target_score: null
+  children_per_gen: 2
+  mode: driver
+  seed: 0
+
+target:
+  seed: builtin-dsh-harbor
+
+surface:
+  include:
+    - target/**
+  exclude:
+    - target/agent.py
+    - target/dsh_trajectory.py
+    - target/runners/**
+
+operators:
+  select:
+    operator: ahe_champion
+    timeout_s: 600
+    config: {}
+  rollout:
+    operator: parent_evaluation
+    timeout_s: 9000
+    config:
+      field_limit: 2000
+  analyze:
+    operator: ahe
+    timeout_s: 5400
+    config:
+      max_tasks: 5
+      max_concurrent: 5
+      timeout_per_task: 900
+      debugger_max_retries: 2
+      field_limit: 2000
+      # DeepSWE rewards are binary: f2p and p2p must both hold.
+      pass_threshold: 1.0
+      debugger:
+        runner: harbor
+        agent: evolve.integrations.harbor.dsh_container:DshContainerAgent
+        model: openai/deepseek-v4.1-flash-1017
+        environment: docker
+        image: evolve-mutate-dsh:20261117-dsh021rc5-musl-cwfix-compaction
+        agent_kwargs: {role: analyst, version: 0.2.1-rc.5}
+        agent_env: {DSH_CONTEXT_WINDOW: "1000000", DSH_MAX_TOKENS: "49152"}
+  mutate:
+    operator: ahe
+    timeout_s: 8000
+    config:
+      runner: harbor
+      expose_gate_data: false
+      agent: evolve.integrations.harbor.dsh_container:DshContainerAgent
+      model: openai/deepseek-v4.1-flash-1017
+      environment: docker
+      image: evolve-mutate-dsh:20261117-dsh021rc5-musl-cwfix-compaction
+      editable_roots: [target]
+      prompt_path: target/profile.cordis.yml
+      agent_kwargs: {role: mutate, version: 0.2.1-rc.5}
+      agent_env: {DSH_CONTEXT_WINDOW: "1000000", DSH_MAX_TOKENS: "49152"}
+      max_retries: 1
+  validate:
+    operator: node_check
+    timeout_s: 300
+    config: {}
+  gate:
+    operator: ahe_artifact_valid
+    timeout_s: 600
+    config: {}
+  record:
+    operator: jsonl
+    timeout_s: 600
+    config: {}
+  timeout_s: 600
+
+evaluator:
+  engine: harbor
+  model: openai/deepseek-v4.1-flash-1017
+  dataset: /home/fcbbb/RSI/benchmark/deep-swe/tasks
+  agent: target.agent:DshAgent
+  task_scope: full
+  evaluation_split: train
+  sampling: static
+  # Static sampling selects the same first five sorted tasks each generation.
+  tasks_per_round: 5
+  repetitions: 1
+  n_concurrent: 5
+  max_retries: 1
+  benchmark_timeout_is_zero: true
+  partial_floor: 0.8
+  agent_allowed_hosts:
+    - 10.62.64.38
+  agent_env:
+    DSH_CONTEXT_WINDOW: "1000000"
+    DSH_MAX_TOKENS: "49152"
+    DSH_TASK_TIMEOUT_SEC: "10800"
+    DSH_RUNTIME_IMAGE: evolve-mutate-dsh:20261113-dsh021rc5-musl

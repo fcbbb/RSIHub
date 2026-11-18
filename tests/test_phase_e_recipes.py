@@ -11,6 +11,7 @@ SUPPORTED_RECIPES = {
     "ahe_codex",
     "ahe_dsh",
     "ahe_dsh_deepswe",
+    "ahe_dsh_deepswe_fast",
     "ahe_dsh_multibench",
     "ahe_dsh_reviewbench",
     "ahe_dsh_reviewbench_fast",
@@ -33,6 +34,7 @@ MAIN_RECIPES = SUPPORTED_RECIPES - {
     "ahe_dsh_reviewbench_fast",
     "ahe_dsh_sweatlas",
     "ahe_dsh_deepswe",
+    "ahe_dsh_deepswe_fast",
     "ahe_dsh_multibench",
 }
 DSH_RECIPES = {
@@ -41,6 +43,7 @@ DSH_RECIPES = {
     "ahe_dsh_reviewbench_fast",
     "ahe_dsh_sweatlas",
     "ahe_dsh_deepswe",
+    "ahe_dsh_deepswe_fast",
     "ahe_dsh_multibench",
 }
 TERMINAL_BENCH_DATASET = "terminal-bench-2-30-v1"
@@ -172,6 +175,15 @@ def test_supported_recipes_use_harbor_and_method_mutate() -> None:
             "record": "jsonl",
         },
         "ahe_dsh_deepswe": {
+            "select": "ahe_champion",
+            "rollout": "parent_evaluation",
+            "analyze": "ahe",
+            "mutate": "ahe",
+            "validate": "node_check",
+            "gate": "ahe_artifact_valid",
+            "record": "jsonl",
+        },
+        "ahe_dsh_deepswe_fast": {
             "select": "ahe_champion",
             "rollout": "parent_evaluation",
             "analyze": "ahe",
@@ -605,6 +617,7 @@ def test_harbor_evaluator_accepts_validated_runtime_concurrency_override() -> No
     contents = (ROOT / "scaffolds/evaluators/harbor/engine.sh").read_text()
     assert "EVOLVE_HARBOR_N_CONCURRENT_OVERRIDE" in contents
     assert "invalid EVOLVE_HARBOR_N_CONCURRENT_OVERRIDE" in contents
+
 
 
 def test_ahe_dsh_context_and_output_caps_align_across_phases() -> None:

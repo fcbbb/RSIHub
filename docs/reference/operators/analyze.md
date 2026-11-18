@@ -70,7 +70,13 @@ runs/gen-N/analyze/evidence/selected.md
 mutate prompt.
 
 `gepa` additionally writes reflective datasets and per-component reflection.
-`ahe` writes debugger-oriented case analysis.
+`ahe` writes debugger-oriented case analysis. Its `max_tasks` bound applies to
+how many distinct task groups receive deep analysis, not to how many tasks the
+evaluator runs. AHE prioritizes failed and timed-out tasks, distributes them
+across failure signatures, and rotates the selected window by generation. If
+there is room, successful tasks are used as summaries and their window also
+rotates by generation. The rotation is deterministic; evaluation tasks and
+scores are unchanged.
 
 ## Fidelity boundary
 

@@ -20,6 +20,7 @@ from evolve.frozen.config import Config, integer, number, string
 from evolve.frozen.config import object as object_field
 from evolve.frozen.interfaces import AnalyzeOperator, AnalyzeResult, OperatorContext
 from evolve.integrations.harbor._agent_roles import uses_miniswe_submission
+from evolve.population import generation_number
 from library._shared.runners import run_readonly_agent
 
 
@@ -305,16 +306,39 @@ def _failure_signature(cases: list[Case], n_timeout: int) -> str:
     return "benchmark_failure"
 
 
-def _round_robin_by_signature(jobs: list[TaskAnalysisJob], limit: int) -> list[TaskAnalysisJob]:
+def _rotate_analysis_jobs(
+    jobs: list[TaskAnalysisJob], offset: int
+) -> list[TaskAnalysisJob]:
+    if not jobs:
+        return []
+    offset %= len(jobs)
+    return [*jobs[offset:], *jobs[:offset]]
+
+
+def _round_robin_by_signature(
+    jobs: list[TaskAnalysisJob], limit: int, generation: int = 0
+) -> list[TaskAnalysisJob]:
     buckets: dict[str, list[TaskAnalysisJob]] = {}
     for job in jobs:
         buckets.setdefault(job.signature, []).append(job)
     for group in buckets.values():
         group.sort(key=lambda job: (-(job.n_fail + job.n_timeout), job.task_name))
+    if not buckets:
+        return []
+    # Rotate both the signature order and each signature's task window, so a
+    # capped analysis does not keep favoring the same sorted prefix.
+    per_signature = max(1, math.ceil(limit / len(buckets)))
+    buckets = {
+        signature: _rotate_analysis_jobs(group, generation * per_signature)
+        for signature, group in buckets.items()
+    }
+    signatures = sorted(buckets)
+    signature_offset = (generation * limit) % len(signatures)
+    signatures = [*signatures[signature_offset:], *signatures[:signature_offset]]
     selected: list[TaskAnalysisJob] = []
     while len(selected) < limit:
         progressed = False
-        for signature in sorted(buckets):
+        for signature in signatures:
             if buckets[signature] and len(selected) < limit:
                 selected.append(buckets[signature].pop(0))
                 progressed = True
@@ -323,7 +347,12 @@ def _round_robin_by_signature(jobs: list[TaskAnalysisJob], limit: int) -> list[T
     return selected
 
 
-def _build_jobs(cases: list[Case], max_tasks: int, pass_threshold: float = 1.0) -> list[TaskAnalysisJob]:
+def _build_jobs(
+    cases: list[Case],
+    max_tasks: int,
+    pass_threshold: float = 1.0,
+    generation: int = 0,
+) -> list[TaskAnalysisJob]:
     grouped: dict[str, list[Case]] = {}
     for case in cases:
         task_name = str(case.get("task_name") or case.get("trial_name") or "unknown")
@@ -354,10 +383,16 @@ def _build_jobs(cases: list[Case], max_tasks: int, pass_threshold: float = 1.0) 
                 signature=signature,
             )
         )
-    failures = _round_robin_by_signature([job for job in jobs if job.mode == "debug"], max_tasks)
+    failures = _round_robin_by_signature(
+        [job for job in jobs if job.mode == "debug"], max_tasks, generation
+    )
     remaining = max_tasks - len(failures)
-    summaries = sorted((job for job in jobs if job.mode == "summary"), key=lambda job: job.task_name)
-    return [*failures, *summaries[:remaining]]
+    summaries = sorted(
+        (job for job in jobs if job.mode == "summary"), key=lambda job: job.task_name
+    )
+    summary_offset = generation * remaining
+    rotated_summaries = _rotate_analysis_jobs(summaries, summary_offset)
+    return [*failures, *rotated_summaries[:remaining]]
 
 
 _DEBUG_K1 = """You are the AHE LLM debugger. Analyze this failed or timed-out rollout for {task_name}.
@@ -1031,10 +1066,12 @@ class AheAnalyze(AnalyzeOperator):
         field_limit = _positive_int(ctx.config.get("field_limit"), 2000)
         pass_threshold = _pass_threshold(ctx.config.get("pass_threshold", 1.0))
         cases = [_normalize(case, field_limit) for case in raw_cases]
+        generation = generation_number(ctx.genid)
         jobs = _build_jobs(
             cases,
             _positive_int(ctx.config.get("max_tasks"), 90),
             pass_threshold,
+            generation=generation or 0,
         )
         results = _run_debugger_jobs(checkout, ctx, jobs)
         overview = _overview(cases, jobs, None)

@@ -9,6 +9,7 @@ SUPPORTED = {
     "ahe_codex",
     "ahe_dsh",
     "ahe_dsh_deepswe",
+    "ahe_dsh_deepswe_fast",
     "ahe_dsh_multibench",
     "ahe_dsh_reviewbench",
     "ahe_dsh_reviewbench_fast",

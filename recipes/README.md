@@ -13,6 +13,7 @@ represents.
 - [Agentic Harness Engineering on ReviewBench, five-task fast iteration](ahe_dsh_reviewbench_fast/README.md)
 - [Agentic Harness Engineering on SWE-Atlas unit tests](ahe_dsh_sweatlas/README.md)
 - [Agentic Harness Engineering on deep-swe](ahe_dsh_deepswe/README.md)
+- [Agentic Harness Engineering on DeepSWE, five-task fast iteration](ahe_dsh_deepswe_fast/README.md)
 - [Agentic Harness Engineering on the combined DeepSWE, ReviewBench, and SWE-Atlas set](ahe_dsh_multibench/README.md)
 - [GEPA](gepa/README.md)
 - [GEPA, fully local](gepa_local/README.md)

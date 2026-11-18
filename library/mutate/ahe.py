@@ -268,6 +268,18 @@ def _safe_task_name(task_name: str) -> str:
     return "task-" + hashlib.sha256(task_name.encode()).hexdigest()
 
 
+def _match_selected_review(
+    task_name: str, signature: str, selected: dict[tuple[str, str], str]
+) -> tuple[str, str] | None:
+    if (task_name, signature) in selected:
+        return task_name, signature
+    # The model sometimes drops the dataset prefix (`review-bench/`) from a task
+    # name; the leaf name is still unambiguous inside one analysis.
+    leaf = task_name.rsplit("/", 1)[-1]
+    matches = [(task, sig) for task, sig in selected if sig == signature and task.rsplit("/", 1)[-1] == leaf]
+    return matches[0] if len(matches) == 1 else None
+
+
 def _validate_reviewed_evidence(manifest: dict[str, Any], ctx: OperatorContext) -> dict[str, Any]:
     overview_path = ctx.run_dir / "analyze" / "evidence" / "overview.json"
     try:
@@ -281,33 +293,53 @@ def _validate_reviewed_evidence(manifest: dict[str, Any], ctx: OperatorContext) 
         for signature in overview.get("failure_signatures", [])
         if isinstance(signature, str) and signature
     }
-    selected = {
-        (str(item.get("task_name")), str(item.get("signature")))
-        for item in overview.get("selected_tasks", [])
-        if isinstance(item, dict) and item.get("mode") == "debug"
-    }
-    detail_dir = ctx.run_dir / "analyze" / "analysis" / "detail"
+    selected: dict[tuple[str, str], str] = {}
+    for item in overview.get("selected_tasks", []):
+        if not isinstance(item, dict):
+            continue
+        task_name = item.get("task_name")
+        signature = item.get("signature")
+        if isinstance(task_name, str) and task_name and isinstance(signature, str) and signature:
+            selected[(task_name, signature)] = str(item.get("mode") or "")
+    detail_dir = (ctx.run_dir / "analyze" / "analysis" / "detail").resolve()
     covered: set[str] = set()
     reviewed_tasks: set[str] = set()
+    # Collect every problem so one retry can fix the whole manifest: raising on
+    # the first slip leaves the next one for another round the model may not get.
+    problems: list[str] = []
     for review in manifest["evidence_reviews"]:
         task_name = review["task_name"]
         signature = review["signature"]
-        if (task_name, signature) not in selected:
-            raise ValueError(f"AHE evidence review does not match a selected task: {task_name}")
+        key = _match_selected_review(task_name, signature, selected)
+        if key is None:
+            expected = "; ".join(f"{task} [{sig}]" for task, sig in sorted(selected)) or "none"
+            problems.append(
+                "AHE evidence review does not match a selected task: "
+                f"{task_name} [{signature}]; expected one of: {expected}"
+            )
+            continue
+        task_name, signature = key
         detail_path = detail_dir / f"{_safe_task_name(task_name)}.md"
         try:
-            detail_path.resolve().relative_to(detail_dir.resolve())
+            detail_path.resolve().relative_to(detail_dir)
             detail = detail_path.read_text()
-        except (OSError, ValueError, UnicodeDecodeError) as exc:
-            raise ValueError(f"AHE selected task detail is missing or unsafe: {task_name}") from exc
+        except (OSError, ValueError, UnicodeDecodeError):
+            problems.append(f"AHE selected task detail is missing or unsafe: {task_name}")
+            continue
         quote = review["evidence_quote"]
         if len(quote) < 12 or quote not in detail:
-            raise ValueError(f"AHE evidence quote is not present in selected task detail: {task_name}")
-        covered.add(signature)
+            problems.append(f"AHE evidence quote is not present in selected task detail: {task_name}")
+            continue
+        # Only failures count toward signature coverage; a review of an all-pass
+        # task is real evidence but cannot stand in for a missing failure review.
+        if selected[key] == "debug":
+            covered.add(signature)
         reviewed_tasks.add(task_name)
     missing = sorted(required - covered)
     if missing:
-        raise ValueError("AHE evidence review must cover each selected failure signature: " + ", ".join(missing))
+        problems.append("AHE evidence review must cover each selected failure signature: " + ", ".join(missing))
+    if problems:
+        raise ValueError("AHE manifest evidence review rejected:\n" + "\n".join(f"- {item}" for item in problems))
     return {
         "required_failure_signatures": sorted(required),
         "covered_failure_signatures": sorted(covered),
@@ -373,8 +405,8 @@ def build_prompt(checkout: Path, observation: str, ctx: OperatorContext) -> str:
     return (
         f"{target_prompt.rstrip()}\n\n"
         "# Evidence review before decisions or edits\n\n"
-        f"1. Read `{overview}` and list every distinct selected failure signature.\n"
-        f"2. For each signature, read at least one matching per-task detail under `{details}`. An exact quote must appear in the final evidence review: copy the sentence character for character from that detail file, with no paraphrase and no added commentary, and put your own reading of it in `finding`. The validator checks that the whole quote string exists in that detail.\n"
+        f'1. Read `{overview}`. Only the tasks under "Failures and timeouts" are failure evidence; list every distinct signature among them.\n'
+        f"2. For each failure signature, read at least one matching per-task detail under `{details}`. An exact quote must appear in the final evidence review: copy the sentence character for character from that detail file, with no paraphrase and no added commentary, and put your own reading of it in `finding`. The validator checks that the whole quote string exists in that detail. Name each reviewed task exactly as the overview shows it and use the exact signature shown next to it; a review of an all-pass task (signature `successful_rollout`) is allowed but covers no failure signature, so it never replaces a failure review.\n"
         f"3. Use `{cases}` and raw rollout artifacts under `{rollout}` to resolve gaps or conflicts; do not claim evidence you did not inspect.\n"
         f"4. Read `{attribution}` and {prior_change}\n"
         "5. Record the observed evidence, falsifiable hypothesis, expected benefit, regression risk, and a disconfirming observation. Only then choose KEEP, REVISE, or ROLLBACK + PIVOT. If no selected failures exist, use an empty evidence_reviews list and do not invent failure evidence.\n"

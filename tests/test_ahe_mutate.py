@@ -1,3 +1,4 @@
+import hashlib
 import importlib.util
 import json
 import random
@@ -301,6 +302,84 @@ def test_ahe_evidence_audit_requires_each_signature_and_matching_detail_quote(tm
     )
     with pytest.raises(ValueError, match="quote is not present"):
         module._validate_reviewed_evidence(manifest, ctx)
+
+
+def test_ahe_evidence_review_of_an_all_pass_task_covers_no_signature(tmp_path: Path) -> None:
+    module = _module()
+    _checkout, _run_dir, ctx = _case(tmp_path)
+    overview_path = ctx.run_dir / "analyze/evidence/overview.json"
+    overview = json.loads(overview_path.read_text())
+    overview["selected_tasks"].append({"task_name": "task-c", "signature": "successful_rollout", "mode": "summary"})
+    overview_path.write_text(json.dumps(overview))
+    (ctx.run_dir / "analyze/analysis/detail/task-c.md").write_text("ALL PASS: every finding was verified.\n")
+    manifest = _manifest()
+
+    summary_review = {
+        "task_name": "task-c",
+        "signature": "successful_rollout",
+        "evidence_quote": "ALL PASS: every finding was verified.",
+        "finding": "this task passed, so it is context rather than failure evidence",
+    }
+    manifest["evidence_reviews"] = [summary_review]
+    with pytest.raises(ValueError, match="each selected failure signature"):
+        module._validate_reviewed_evidence(manifest, ctx)
+
+    manifest["evidence_reviews"].append(_manifest()["evidence_reviews"][0])
+    audit = module._validate_reviewed_evidence(manifest, ctx)
+    assert audit["covered_failure_signatures"] == ["benchmark_failure"]
+    assert audit["reviewed_tasks"] == ["task-a", "task-c"]
+    assert audit["review_count"] == 2
+
+
+def test_ahe_evidence_review_with_the_wrong_signature_lists_the_expected_pairs(tmp_path: Path) -> None:
+    module = _module()
+    _checkout, _run_dir, ctx = _case(tmp_path)
+    manifest = _manifest()
+    manifest["evidence_reviews"][0]["signature"] = "successful_rollout"
+
+    with pytest.raises(
+        ValueError, match=r"task-a \[successful_rollout\]; expected one of: task-a \[benchmark_failure\]"
+    ):
+        module._validate_reviewed_evidence(manifest, ctx)
+
+
+def test_ahe_evidence_review_matches_a_dataset_prefixed_task_by_its_leaf_name(tmp_path: Path) -> None:
+    module = _module()
+    _checkout, _run_dir, ctx = _case(tmp_path)
+    overview_path = ctx.run_dir / "analyze/evidence/overview.json"
+    overview = json.loads(overview_path.read_text())
+    overview["selected_tasks"] = [{"task_name": "dataset/task-a", "signature": "benchmark_failure", "mode": "debug"}]
+    overview_path.write_text(json.dumps(overview))
+    digest = hashlib.sha256(b"dataset/task-a").hexdigest()
+    (ctx.run_dir / f"analyze/analysis/detail/task-{digest}.md").write_text("DETAIL BODY MUST STAY ON DISK\n")
+    manifest = _manifest()
+    manifest["evidence_reviews"][0]["task_name"] = "task-a"
+
+    audit = module._validate_reviewed_evidence(manifest, ctx)
+
+    assert audit["reviewed_tasks"] == ["dataset/task-a"]
+
+
+def test_ahe_evidence_review_reports_every_problem_at_once(tmp_path: Path) -> None:
+    module = _module()
+    _checkout, _run_dir, ctx = _case(tmp_path)
+    manifest = _manifest()
+    manifest["evidence_reviews"][0]["evidence_quote"] = "a paraphrase that is not in the detail"
+    manifest["evidence_reviews"].append(
+        {
+            "task_name": "task-z",
+            "signature": "benchmark_failure",
+            "evidence_quote": "some quote that does not matter here",
+            "finding": "unknown task",
+        }
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        module._validate_reviewed_evidence(manifest, ctx)
+
+    message = str(excinfo.value)
+    assert "quote is not present in selected task detail: task-a" in message
+    assert "does not match a selected task: task-z [benchmark_failure]" in message
 
 
 def test_ahe_mutate_requires_valid_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

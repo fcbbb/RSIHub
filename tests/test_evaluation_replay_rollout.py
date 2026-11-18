@@ -207,6 +207,48 @@ def test_replay_keeps_certified_atif_as_workspace_relative_reference(tmp_path: P
     assert trajectory["format"] == "atif"
     assert retained.is_relative_to(ctx.run_dir / "rollout" / "certified-jobs")
     assert hashlib.sha256(retained.read_bytes()).hexdigest() == trajectory["sha256"]
+    diagnostic = case["diagnostic_trace"]
+    assert diagnostic["status"] == "available"
+    assert diagnostic["event_count"] == 1
+    trace = workspace / diagnostic["path"]
+    assert trace.is_relative_to(ctx.run_dir / "rollout" / "diagnostic-evidence")
+    assert trace.is_file()
+
+
+def test_replay_passes_diagnostic_evidence_dir_only_to_supporting_collectors(tmp_path: Path, monkeypatch) -> None:
+    module = _replay_module()
+    workspace = tmp_path / "workspace"
+    _jobs, reference = _artifact(workspace)
+    rows = {"3": {"genid": "3", "artifacts": reference, "score": 1.0}}
+    observed: dict[str, object] = {}
+
+    def collect(
+        _selected_jobs: Path,
+        *,
+        field_limit: int,
+        pass_threshold: float,
+        diagnostic_evidence_dir: Path,
+    ):
+        observed.update(
+            {
+                "field_limit": field_limit,
+                "pass_threshold": pass_threshold,
+                "diagnostic_evidence_dir": diagnostic_evidence_dir,
+            }
+        )
+        return [{"task_name": "task-a", "trial_name": "task-a__trial-0", "reward": 1.0, "outcome": "passed"}]
+
+    monkeypatch.setattr(module, "ArchiveView", lambda _workspace: _Archive(rows))
+    monkeypatch.setattr(module, "_load_collect_cases", lambda _checkout: collect)
+    ctx = _context(workspace, parent="3")
+
+    module.EvaluationReplayRollout().rollout(ctx.checkout, ctx)
+
+    assert observed == {
+        "field_limit": 1200,
+        "pass_threshold": 1.0,
+        "diagnostic_evidence_dir": ctx.run_dir / "rollout" / "diagnostic-evidence",
+    }
 
 
 def test_replay_rejects_trajectory_reference_digest_mismatch(tmp_path: Path) -> None:

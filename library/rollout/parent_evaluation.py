@@ -377,6 +377,7 @@ class ParentEvaluationRollout(RolloutOperator):
         jobs_dirs: list[Path] = []
         rollout_dir = ctx.run_dir / "rollout"
         rollout_dir.mkdir(parents=True, exist_ok=True)
+        diagnostic_evidence_dir = rollout_dir / "diagnostic-evidence"
         certified_parent = rollout_dir / "certified-jobs"
         certified_parent.mkdir(exist_ok=True)
         certified_root = Path(tempfile.mkdtemp(prefix="snapshot-", dir=certified_parent))
@@ -390,6 +391,10 @@ class ParentEvaluationRollout(RolloutOperator):
             }
             if "workspace" in collector_parameters:
                 collector_kwargs["workspace"] = ctx.workspace
+            # Without an evidence dir the collector reports every diagnostic trace as
+            # unavailable, so the analyzer has nothing to review in a replayed parent.
+            if "diagnostic_evidence_dir" in collector_parameters:
+                collector_kwargs["diagnostic_evidence_dir"] = diagnostic_evidence_dir
             source_cases = collector(replay_jobs, **collector_kwargs)
             _certify_result_paths(source_cases, replay_jobs, certified, workspace=ctx.workspace)
             if task_filter is not None:

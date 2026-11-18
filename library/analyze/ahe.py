@@ -541,8 +541,6 @@ def _debugger_prompt(job: TaskAnalysisJob) -> str:
         )
         + "\n\n# Trace evidence\n\n"
         + f"Read the trial index from `{DEBUGGER_EVIDENCE_PATH}`. Full redacted event and verifier files are separate files in the same inputs directory. "
-        + "Use `python /app/task/inputs/trace_reader.py search <file> <term>` to locate timeout, error, failed-test, traceback, and retry evidence. "
-        + "Then use `trace_reader.py show <file> <record_index> --field <field> --offset <n> --length <n>` to inspect the relevant event and surrounding records. "
         + "The full files are authoritative; do not infer that an event is absent from the short index. Cite each diagnosis with trial_name and record_index. "
         + "If a trace is unavailable or its reference failed validation, state that limitation and use the remaining evidence."
     )
@@ -634,7 +632,6 @@ def _run_debugger_job(checkout: Path, ctx: OperatorContext, job: TaskAnalysisJob
                 timeout_s=timeout_s,
                 input_files={
                     "trace-evidence.json": _debugger_evidence(job, trace_index),
-                    "trace_reader.py": (Path(__file__).with_name("_trace_reader.py").read_text()),
                 },
                 input_paths=trace_paths,
                 input_path_sha256={name: name[len("trace-") : -len(".jsonl")] for name in trace_paths},

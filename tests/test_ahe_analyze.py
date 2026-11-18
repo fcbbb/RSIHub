@@ -364,13 +364,12 @@ def test_ahe_debugger_keeps_trace_evidence_out_of_prompt() -> None:
     evidence = module._debugger_evidence(job, [{"trial_name": "task-a", "status": "missing"}])
 
     assert "/app/task/inputs/trace-evidence.json" in prompt
-    assert "trace_reader.py search" in prompt
     assert "TRACE BODY MUST STAY ON DISK" not in prompt
     assert "TRACE BODY MUST STAY ON DISK" not in evidence
     assert '"status": "missing"' in evidence
 
 
-def test_ahe_debugger_mounts_trace_index_and_reader(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ahe_debugger_mounts_trace_index(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     module = _module()
     ctx = _ctx(tmp_path)
     job = module._build_jobs([_case("task-a", "failed", 0)], 90)[0]
@@ -384,11 +383,10 @@ def test_ahe_debugger_mounts_trace_index_and_reader(tmp_path: Path, monkeypatch:
 
     module._run_debugger_job(ctx.checkout, ctx, job)
 
-    assert set(captured["input_files"]) == {"trace-evidence.json", "trace_reader.py"}
+    assert set(captured["input_files"]) == {"trace-evidence.json"}
     assert captured["input_paths"] == {}
     assert '"task_name": "task-a"' in captured["input_files"]["trace-evidence.json"]
     assert '"status": "missing"' in captured["input_files"]["trace-evidence.json"]
-    assert "def search_file" in captured["input_files"]["trace_reader.py"]
 
 
 def test_ahe_debugger_mounts_verified_full_trace_by_reference(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -480,21 +478,18 @@ def test_ahe_single_task_smoke_finds_late_timeout_with_event_citation(
         "redacted": True,
     }
     job = module._build_jobs([case], 90)[0]
-    reader = importlib.import_module("library.analyze._trace_reader")
 
     def smoke_runner(*args, input_files, input_paths, **kwargs):
         del args, kwargs
-        assert "trace_reader.py" in input_files
+        assert set(input_files) == {"trace-evidence.json"}
         [filename] = input_paths
-        match = reader.search_file(input_paths[filename], "TimeoutError")[0]
-        excerpt = reader.read_slice(
-            input_paths[filename],
-            match["record_index"],
-            "event.observation",
-            match["matches"][0][0],
-            120,
-        )
-        assert "exceeded its deadline" in excerpt["text"]
+        rows = [
+            json.loads(line)
+            for line in input_paths[filename].read_text().splitlines()
+            if line.strip()
+        ]
+        [match] = [row for row in rows if "TimeoutError" in row["event"]["observation"]]
+        assert "exceeded its deadline" in match["event"]["observation"]
         response = f"ROOT CAUSE: verifier timeout. Evidence: trial=trial-timeout, record_index={match['record_index']}."
         return AgentRunResult(response, "", response, 0, 0.1, {"usd": 0.0})
 

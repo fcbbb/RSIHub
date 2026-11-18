@@ -1085,22 +1085,12 @@ def test_harbor_archives_full_redacted_trace_and_verifier_evidence(tmp_path: Pat
     assert "verifier-secret-value" not in content
     assert "[REDACTED]" in content
 
-    reader = importlib.import_module("library.analyze._trace_reader")
     rows = [json.loads(line) for line in content.splitlines()]
     final = rows[59]
+    assert final["record_index"] == 59
     final_text = final["event"]["observation"]["results"][0]["content"]
-    match = reader.search_file(source, tail)
-    assert match[0]["record_index"] == 59
-    offset = final_text.index(tail)
-    excerpt = reader.read_slice(
-        source,
-        59,
-        "event.observation.results.0.content",
-        offset - 10,
-        len(tail) + 20,
-    )
-    assert tail in excerpt["text"]
-    assert excerpt["next_offset"] is None
+    assert tail in final_text
+    assert len(final_text) > 2000
 
 
 def test_harbor_archives_full_codex_session_fallback(tmp_path: Path) -> None:

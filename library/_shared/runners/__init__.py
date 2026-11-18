@@ -40,6 +40,8 @@ def run_readonly_agent(
     job_name: str,
     timeout_s: float,
     input_files: dict[str, str] | None = None,
+    input_paths: dict[str, Path] | None = None,
+    input_path_sha256: dict[str, str] | None = None,
 ) -> AgentRunResult:
     return harbor.run_readonly_agent(
         checkout,
@@ -49,4 +51,6 @@ def run_readonly_agent(
         job_name=job_name,
         timeout_s=timeout_s,
         input_files=input_files,
+        input_paths=input_paths,
+        input_path_sha256=input_path_sha256,
     )

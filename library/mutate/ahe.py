@@ -215,6 +215,21 @@ def _safe_usage(usage: object) -> dict[str, Any]:
     return normalized
 
 
+def _iteration_matches(value: object, genid: str) -> bool:
+    """Accept the operator genid, or the bare generation number it starts with.
+
+    Fan-out children are addressed as ``2-1``, and models routinely write just
+    ``2`` (or the number 2) for the generation they are editing. The field is a
+    self-check that the model used the current context, not an identifier the
+    run keys on, so the narrower value is accepted; anything else is not.
+    """
+    if str(value) == genid:
+        return True
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        return False
+    return str(value) == genid.split("-", 1)[0]
+
+
 def _extract_manifest(output: str, genid: str) -> dict[str, Any]:
     starts = [match.start() for match in re.finditer(re.escape(MANIFEST_START), output)]
     ends = [match.start() for match in re.finditer(re.escape(MANIFEST_END), output)]
@@ -224,7 +239,7 @@ def _extract_manifest(output: str, genid: str) -> dict[str, Any]:
     payload = json.loads(raw)
     if not isinstance(payload, dict):
         raise ValueError("AHE manifest must be a JSON object")
-    if str(payload.get("iteration")) != genid:
+    if not _iteration_matches(payload.get("iteration"), genid):
         raise ValueError("AHE manifest iteration does not match operator context")
     if not isinstance(payload.get("changes"), list):
         raise ValueError("AHE manifest changes must be a list")
@@ -371,7 +386,8 @@ def build_prompt(checkout: Path, observation: str, ctx: OperatorContext) -> str:
         f"{writes_manifest}write the following JSON object to `{MANIFEST_FILE}`. Write JSON only; this control file "
         "is removed before the candidate patch is created. Follow this contract exactly: keep these keys, this "
         "nesting, and these value types, replace every example value with the real one, and do not rename, merge, "
-        "add, or drop fields. If you choose KEEP, leave `changes` as an empty list and make no edit under `target/`; "
+        "add, or drop fields. `iteration` must be exactly the string shown above, not a number. If you choose KEEP, "
+        "leave `changes` as an empty list and make no edit under `target/`; "
         "that generation records no proposal and keeps the parent. Any edit under `target/` must be covered by at "
         f"least one entry in `changes`. {submit_clause}\n\n"
         f"```json\n{json.dumps(template, indent=2)}\n```\n"

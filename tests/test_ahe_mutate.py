@@ -136,6 +136,15 @@ def test_ahe_manifest_extraction_and_validation(tmp_path: Path) -> None:
     stale["iteration"] = 9
     with pytest.raises(ValueError, match="iteration"):
         module._extract_manifest(_output(stale), "1")
+    # Fan-out children: the bare generation number names the same context.
+    for loose in (1, "1"):
+        fan_out = _manifest()
+        fan_out["iteration"] = loose
+        assert module._extract_manifest(_output(fan_out), "1-1")["iteration"] == loose
+    wrong_generation = _manifest()
+    wrong_generation["iteration"] = 2
+    with pytest.raises(ValueError, match="iteration"):
+        module._extract_manifest(_output(wrong_generation), "1-1")
     empty = _manifest()
     empty["changes"] = []
     assert module._extract_manifest(_output(empty), "1") == empty
@@ -168,6 +177,7 @@ def test_ahe_prompt_uses_official_decisions_and_required_manifest(tmp_path: Path
         "Runtime prompt/config: `target/src/minisweagent/config/mini.yaml`",
         "This method further restricts the current proposal to: `target`",
         "do not rename, merge, add, or drop fields",
+        "`iteration` must be exactly the string shown above, not a number",
         "leave `changes` as an empty list",
         "records no proposal and keeps the parent",
         "must be covered by at least one entry in `changes`",

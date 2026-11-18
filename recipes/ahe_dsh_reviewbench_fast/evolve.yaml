@@ -44,9 +44,12 @@ operators:
       timeout_per_task: 900
       debugger_max_retries: 2
       field_limit: 2000
-      # ReviewBench rewards are continuous F1. The default 1.0 labels every
-      # imperfect review as failed; lower it if the debugger becomes noisy.
-      pass_threshold: 0.5
+      # ReviewBench rewards are continuous F1, and the target metric here is
+      # pass@1, which the rollout operator already scores at 1.0. Keeping the
+      # same bar for analysis means an imperfect review is a failure worth
+      # debugging; at 0.5 every pinned task counted as a pass, the debugger
+      # found no failure signature, and every generation chose KEEP.
+      pass_threshold: 1.0
       debugger:
         runner: harbor
         agent: evolve.integrations.harbor.dsh_container:DshContainerAgent

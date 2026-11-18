@@ -10,7 +10,7 @@ from typing import Any
 
 from evolve.agent import AgentCommandError
 from evolve.frozen import sdk
-from evolve.frozen.config import string
+from evolve.frozen.config import integer, string
 from evolve.frozen.interfaces import MutateOperator, MutateResult, OperatorContext
 from evolve.patching import create_candidate_patch, load_surface_policy, patch_parent_ref
 from library._shared.artifacts import render_artifact_guidance
@@ -26,6 +26,10 @@ CONFIG = WORKSPACE_CONFIG.extend(
         "prompt_path": string(),
         "skills_dir": string(),
         "memory_dir": string(),
+        # A rejected change manifest costs the whole generation, so give the
+        # agent one more turn to rewrite the control file it already knows how
+        # to produce. The candidate edits are kept; only the manifest is redone.
+        "manifest_retries": integer(default=1, minimum=0),
     }
 )
 
@@ -370,7 +374,7 @@ def build_prompt(checkout: Path, observation: str, ctx: OperatorContext) -> str:
         f"{target_prompt.rstrip()}\n\n"
         "# Evidence review before decisions or edits\n\n"
         f"1. Read `{overview}` and list every distinct selected failure signature.\n"
-        f"2. For each signature, read at least one matching per-task detail under `{details}`. An exact quote must appear in the final evidence review; the validator checks that the quote exists in that detail.\n"
+        f"2. For each signature, read at least one matching per-task detail under `{details}`. An exact quote must appear in the final evidence review: copy the sentence character for character from that detail file, with no paraphrase and no added commentary, and put your own reading of it in `finding`. The validator checks that the whole quote string exists in that detail.\n"
         f"3. Use `{cases}` and raw rollout artifacts under `{rollout}` to resolve gaps or conflicts; do not claim evidence you did not inspect.\n"
         f"4. Read `{attribution}` and {prior_change}\n"
         "5. Record the observed evidence, falsifiable hypothesis, expected benefit, regression risk, and a disconfirming observation. Only then choose KEEP, REVISE, or ROLLBACK + PIVOT. If no selected failures exist, use an empty evidence_reviews list and do not invent failure evidence.\n"
@@ -394,6 +398,26 @@ def build_prompt(checkout: Path, observation: str, ctx: OperatorContext) -> str:
     )
 
 
+def _merge_usage(total: dict[str, Any], extra: object) -> dict[str, Any]:
+    merged = dict(total)
+    for key, value in _safe_usage(extra).items():
+        previous = merged.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            merged[key] = round(float(previous or 0) + float(value), 6)
+        elif key not in merged:
+            merged[key] = value
+    return merged
+
+
+def _correction_prompt(prompt: str, error: ValueError) -> str:
+    return (
+        f"{prompt}\n\n# Change manifest correction\n\n"
+        f"Your candidate edit is already in place. The change manifest was rejected: {error}\n"
+        f"Rewrite only `{MANIFEST_FILE}` so that it satisfies this check, then finish the turn. "
+        "Do not edit `target/` again.\n"
+    )
+
+
 class AheMutate(MutateOperator):
     def mutate(self, checkout: Path, observation: str, ctx: OperatorContext) -> MutateResult:
         parent_ref = patch_parent_ref(checkout, ctx)
@@ -401,26 +425,37 @@ class AheMutate(MutateOperator):
         out.mkdir(parents=True, exist_ok=True)
         prompt = build_prompt(checkout, observation, ctx)
         (out / "prompt.md").write_text(prompt)
-        try:
-            agent_run = run_agent(checkout, prompt, ctx)
-        except AgentCommandError as exc:
-            (out / "output.txt").write_text(exc.output)
-            _write_json(out / "usage.json", _safe_usage(exc.usage))
-            raise SystemExit(exc.returncode)
-
-        manifest_error: ValueError | None = None
+        retries = int(ctx.config.get("manifest_retries", 1))
+        usage: dict[str, Any] = {"usd": 0}
+        manifest: dict[str, Any] | None = None
         evidence_audit: dict[str, Any] = {}
-        try:
-            manifest = _read_manifest_file(checkout, ctx.genid)
-            evidence_audit = _validate_reviewed_evidence(manifest, ctx)
-        except ValueError as exc:
-            manifest = None
-            manifest_error = exc
-        (out / "output.txt").write_text(agent_run.output)
-        usage = _safe_usage(agent_run.usage)
-        _write_json(out / "usage.json", usage)
-        if manifest_error is not None:
-            (out / "manifest_validation_error.txt").write_text(str(manifest_error) + "\n")
+        manifest_error: ValueError | None = None
+        for attempt in range(1, retries + 2):
+            attempt_prompt = prompt if manifest_error is None else _correction_prompt(prompt, manifest_error)
+            if attempt > 1:
+                (out / f"prompt.retry-{attempt - 1}.md").write_text(attempt_prompt)
+            try:
+                agent_run = run_agent(checkout, attempt_prompt, ctx)
+            except AgentCommandError as exc:
+                (out / "output.txt").write_text(exc.output)
+                _write_json(out / "usage.json", _merge_usage(usage, exc.usage))
+                raise SystemExit(exc.returncode)
+            usage = _merge_usage(usage, agent_run.usage)
+            (out / "output.txt").write_text(agent_run.output)
+            _write_json(out / "usage.json", usage)
+            try:
+                manifest = _read_manifest_file(checkout, ctx.genid)
+                evidence_audit = _validate_reviewed_evidence(manifest, ctx)
+            except ValueError as exc:
+                manifest = None
+                manifest_error = exc
+                (out / "manifest_validation_error.txt").write_text(str(exc) + "\n")
+                continue
+            manifest_error = None
+            (out / "manifest_validation_error.txt").unlink(missing_ok=True)
+            break
+        if manifest is None:
+            assert manifest_error is not None
             raise manifest_error
 
         patch = create_candidate_patch(
@@ -429,7 +464,6 @@ class AheMutate(MutateOperator):
             surface=load_surface_policy(checkout),
             repair=False,
         )
-        usage = _safe_usage(agent_run.usage)
         (out / "model_patch.diff").write_text(patch.diff)
         (out / "patch.diff").write_text(patch.diff)
         (out / "output.txt").write_text(agent_run.output)

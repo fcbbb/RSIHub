@@ -361,6 +361,77 @@ def test_ahe_no_op_manifest_rejects_unlisted_edits(tmp_path: Path, monkeypatch: 
     assert not (run_dir / "mutate/change_manifest.json").exists()
 
 
+def test_ahe_mutate_rewrites_a_rejected_manifest_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _module()
+    checkout, run_dir, ctx = _case(tmp_path)
+    prompts: list[str] = []
+
+    def fake_run_agent(root: Path, prompt: str, _ctx: OperatorContext):
+        prompts.append(prompt)
+        source = root / "target/src/minisweagent/agents/default.py"
+        source.write_text("STEP_LIMIT = 10\nRETRY_TOOL_ERRORS = True\n")
+        manifest = _manifest()
+        if len(prompts) == 1:
+            manifest["iteration"] = 9
+        (root / "target/.ahe-change-manifest.json").write_text(json.dumps(manifest))
+        return SimpleNamespace(output=f"edited (attempt {len(prompts)})", usage={"usd": 0.25})
+
+    monkeypatch.setattr(module, "run_agent", fake_run_agent)
+    result = module.AheMutate().mutate(checkout, "fallback", ctx)
+
+    assert len(prompts) == 2
+    assert "Change manifest correction" not in prompts[0]
+    assert "Change manifest correction" in prompts[1]
+    assert "iteration does not match" in prompts[1]
+    assert result.changed == ["target/src/minisweagent/agents/default.py"]
+    assert result.usage["usd"] == 0.5
+    assert (run_dir / "mutate/prompt.retry-1.md").is_file()
+    assert (run_dir / "mutate/output.txt").read_text() == "edited (attempt 2)"
+    assert not (run_dir / "mutate/manifest_validation_error.txt").exists()
+
+
+def test_ahe_mutate_stops_after_the_manifest_retry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _module()
+    checkout, run_dir, ctx = _case(tmp_path)
+    ctx.config["manifest_retries"] = 1
+    prompts: list[str] = []
+
+    def fake_run_agent(root: Path, prompt: str, _ctx: OperatorContext):
+        prompts.append(prompt)
+        manifest = _manifest()
+        manifest["iteration"] = 9
+        (root / "target/.ahe-change-manifest.json").write_text(json.dumps(manifest))
+        return SimpleNamespace(output="edited", usage={"usd": 0.1})
+
+    monkeypatch.setattr(module, "run_agent", fake_run_agent)
+    with pytest.raises(ValueError, match="iteration"):
+        module.AheMutate().mutate(checkout, "fallback", ctx)
+    assert len(prompts) == 2
+    assert (run_dir / "mutate/manifest_validation_error.txt").is_file()
+    assert not (run_dir / "mutate/change_manifest.json").exists()
+
+
+def test_ahe_mutate_does_not_retry_a_rejected_manifest_when_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _module()
+    checkout, _run_dir, ctx = _case(tmp_path)
+    ctx.config["manifest_retries"] = 0
+    prompts: list[str] = []
+
+    def fake_run_agent(root: Path, prompt: str, _ctx: OperatorContext):
+        prompts.append(prompt)
+        manifest = _manifest()
+        manifest["iteration"] = 9
+        (root / "target/.ahe-change-manifest.json").write_text(json.dumps(manifest))
+        return SimpleNamespace(output="edited", usage={"usd": 0.1})
+
+    monkeypatch.setattr(module, "run_agent", fake_run_agent)
+    with pytest.raises(ValueError, match="iteration"):
+        module.AheMutate().mutate(checkout, "fallback", ctx)
+    assert len(prompts) == 1
+
+
 def test_ahe_invalid_manifest_fails_after_preserving_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     module = _module()
     checkout, run_dir, ctx = _case(tmp_path)

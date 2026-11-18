@@ -91,7 +91,8 @@
       "model": "gpt-5.4",
       "prompt_path": "target/src/minisweagent/config/mini.yaml",
       "runner": "harbor",
-      "skills_dir": "target/skills"
+      "skills_dir": "target/skills",
+      "manifest_retries": 1
     },
     "gate": {},
     "record": {}
@@ -130,7 +131,8 @@
       "model": "gpt-5.4",
       "prompt_path": "target/prompt.md",
       "runner": "harbor",
-      "skills_dir": "target/skills"
+      "skills_dir": "target/skills",
+      "manifest_retries": 1
     },
     "gate": {},
     "record": {}
@@ -185,7 +187,8 @@
       "max_retries": 1,
       "model": "openai/deepseek-v4.1-flash-1017",
       "prompt_path": "target/profile.cordis.yml",
-      "runner": "harbor"
+      "runner": "harbor",
+      "manifest_retries": 1
     },
     "validate": {},
     "gate": {},
@@ -241,7 +244,8 @@
       "max_retries": 1,
       "model": "openai/deepseek-v4.1-flash-1017",
       "prompt_path": "target/profile.cordis.yml",
-      "runner": "harbor"
+      "runner": "harbor",
+      "manifest_retries": 1
     },
     "validate": {},
     "gate": {},
@@ -297,7 +301,8 @@
       "max_retries": 1,
       "model": "openai/deepseek-v4.1-flash-1017",
       "prompt_path": "target/profile.cordis.yml",
-      "runner": "harbor"
+      "runner": "harbor",
+      "manifest_retries": 1
     },
     "validate": {},
     "gate": {},
@@ -353,7 +358,8 @@
       "max_retries": 1,
       "model": "openai/deepseek-v4.1-flash-1017",
       "prompt_path": "target/profile.cordis.yml",
-      "runner": "harbor"
+      "runner": "harbor",
+      "manifest_retries": 1
     },
     "validate": {},
     "gate": {},
@@ -409,7 +415,8 @@
       "max_retries": 1,
       "model": "openai/deepseek-v4.1-flash-1017",
       "prompt_path": "target/profile.cordis.yml",
-      "runner": "harbor"
+      "runner": "harbor",
+      "manifest_retries": 1
     },
     "validate": {},
     "gate": {},
@@ -465,7 +472,8 @@
       "max_retries": 1,
       "model": "openai/deepseek-v4.1-flash-1017",
       "prompt_path": "target/profile.cordis.yml",
-      "runner": "harbor"
+      "runner": "harbor",
+      "manifest_retries": 1
     },
     "validate": {},
     "gate": {},
@@ -521,7 +529,8 @@
       "max_retries": 1,
       "model": "openai/deepseek-v4.1-flash-1017",
       "prompt_path": "target/profile.cordis.yml",
-      "runner": "harbor"
+      "runner": "harbor",
+      "manifest_retries": 1
     },
     "validate": {},
     "gate": {},

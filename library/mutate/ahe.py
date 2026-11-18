@@ -226,8 +226,8 @@ def _extract_manifest(output: str, genid: str) -> dict[str, Any]:
         raise ValueError("AHE manifest must be a JSON object")
     if str(payload.get("iteration")) != genid:
         raise ValueError("AHE manifest iteration does not match operator context")
-    if not isinstance(payload.get("changes"), list) or not payload["changes"]:
-        raise ValueError("AHE manifest changes must be a nonempty list")
+    if not isinstance(payload.get("changes"), list):
+        raise ValueError("AHE manifest changes must be a list")
     for field in ("hypothesis", "disconfirming_observation"):
         if not isinstance(payload.get(field), str) or not payload[field].strip():
             raise ValueError(f"AHE manifest {field} must be nonempty text")
@@ -369,7 +369,11 @@ def build_prompt(checkout: Path, observation: str, ctx: OperatorContext) -> str:
         f"{workspace_contract(checkout, ctx.config, action_paths=['target'])}\n\n"
         "# Required Final Output\n\nEdit the candidate directly. "
         f"{writes_manifest}write the following JSON object to `{MANIFEST_FILE}`. Write JSON only; this control file "
-        f"is removed before the candidate patch is created. {submit_clause}\n\n"
+        "is removed before the candidate patch is created. Follow this contract exactly: keep these keys, this "
+        "nesting, and these value types, replace every example value with the real one, and do not rename, merge, "
+        "add, or drop fields. If you choose KEEP, leave `changes` as an empty list and make no edit under `target/`; "
+        "that generation records no proposal and keeps the parent. Any edit under `target/` must be covered by at "
+        f"least one entry in `changes`. {submit_clause}\n\n"
         f"```json\n{json.dumps(template, indent=2)}\n```\n"
     )
 
@@ -417,6 +421,10 @@ class AheMutate(MutateOperator):
         _write_json(out / "surface-check.json", patch.surface_report)
         _write_json(out / "usage.json", usage)
         assert manifest is not None
+        if not manifest["changes"] and patch.changed_paths:
+            error = ValueError("AHE manifest reports no changes but the candidate worktree differs")
+            (out / "manifest_validation_error.txt").write_text(str(error) + "\n")
+            raise error
         _write_json(out / "change_manifest.json", manifest)
         _write_json(out / "evidence_audit.json", evidence_audit)
         notes = [

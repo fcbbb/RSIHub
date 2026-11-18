@@ -138,8 +138,11 @@ def test_ahe_manifest_extraction_and_validation(tmp_path: Path) -> None:
         module._extract_manifest(_output(stale), "1")
     empty = _manifest()
     empty["changes"] = []
-    with pytest.raises(ValueError, match="changes"):
-        module._extract_manifest(_output(empty), "1")
+    assert module._extract_manifest(_output(empty), "1") == empty
+    malformed = _manifest()
+    malformed["changes"] = "chg-1"
+    with pytest.raises(ValueError, match="changes must be a list"):
+        module._extract_manifest(_output(malformed), "1")
 
 
 def test_ahe_prompt_uses_official_decisions_and_required_manifest(tmp_path: Path) -> None:
@@ -164,6 +167,10 @@ def test_ahe_prompt_uses_official_decisions_and_required_manifest(tmp_path: Path
         "You CAN modify any file under `target/`",
         "Runtime prompt/config: `target/src/minisweagent/config/mini.yaml`",
         "This method further restricts the current proposal to: `target`",
+        "do not rename, merge, add, or drop fields",
+        "leave `changes` as an empty list",
+        "records no proposal and keeps the parent",
+        "must be covered by at least one entry in `changes`",
     ):
         assert required in prompt
     for forbidden in (
@@ -304,6 +311,44 @@ def test_ahe_mutate_requires_valid_manifest(tmp_path: Path, monkeypatch: pytest.
     assert "change-manifest: parsed" in result.notes
     assert json.loads((run_dir / "mutate/change_manifest.json").read_text()) == _manifest()
     assert not (checkout / "target/.ahe-change-manifest.json").exists()
+
+
+def test_ahe_no_op_manifest_keeps_parent_without_edits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _module()
+    checkout, run_dir, ctx = _case(tmp_path)
+    keep = _manifest()
+    keep["changes"] = []
+
+    def fake_run_agent(root: Path, _prompt: str, _ctx: OperatorContext):
+        (root / "target/.ahe-change-manifest.json").write_text(json.dumps(keep))
+        return SimpleNamespace(output="kept the parent", usage={"usd": 0.1})
+
+    monkeypatch.setattr(module, "run_agent", fake_run_agent)
+    result = module.AheMutate().mutate(checkout, "fallback", ctx)
+
+    assert result.changed == []
+    assert json.loads((run_dir / "mutate/change_manifest.json").read_text()) == keep
+    assert (run_dir / "mutate/patch.diff").read_text() == ""
+    assert not (run_dir / "mutate/manifest_validation_error.txt").exists()
+
+
+def test_ahe_no_op_manifest_rejects_unlisted_edits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _module()
+    checkout, run_dir, ctx = _case(tmp_path)
+    keep = _manifest()
+    keep["changes"] = []
+
+    def fake_run_agent(root: Path, _prompt: str, _ctx: OperatorContext):
+        source = root / "target/src/minisweagent/agents/default.py"
+        source.write_text(source.read_text() + "RETRY_TOOL_ERRORS = True\n")
+        (root / "target/.ahe-change-manifest.json").write_text(json.dumps(keep))
+        return SimpleNamespace(output="silently edited", usage={"usd": 0.1})
+
+    monkeypatch.setattr(module, "run_agent", fake_run_agent)
+    with pytest.raises(ValueError, match="reports no changes"):
+        module.AheMutate().mutate(checkout, "fallback", ctx)
+    assert (run_dir / "mutate/manifest_validation_error.txt").is_file()
+    assert not (run_dir / "mutate/change_manifest.json").exists()
 
 
 def test_ahe_invalid_manifest_fails_after_preserving_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

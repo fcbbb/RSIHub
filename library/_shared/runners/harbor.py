@@ -55,6 +55,11 @@ _SECRET_ASSIGNMENT = re.compile(
 )
 _BEARER = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+")
 _SENSITIVE_ENV_NAME = re.compile(r"(?i)(?:proxy|api[_-]?key|access[_-]?token|token|secret|password|authorization|auth)")
+# Mirrors harbor.utils.env._SENSITIVE_KEY_RE. Harbor persists any agent env name
+# matching it as "****" unless the harbor process itself holds the identical
+# value, in which case it keeps a ${NAME} template (see templatize_sensitive_env).
+_HARBOR_SENSITIVE_ENV_NAME = re.compile(r"(KEY|SECRET|TOKEN|PASSWORD|CREDENTIAL|AUTH)", re.IGNORECASE)
+_ENV_TEMPLATE = re.compile(r"\$\{[^}]+\}")
 _CREDENTIAL_ENV = ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_API_BASE")
 _PROXY_ENV = (
     ("EVOLVE_HARBOR_HTTP_PROXY", "http_proxy", "HTTP_PROXY"),
@@ -745,6 +750,25 @@ def _harbor_process_env(
     if str(config.get("agent") or "").strip().lower() == "codex":
         for name in _CREDENTIAL_ENV:
             sanitized.pop(name, None)
+    # Harbor serializes --ae values through templatize_sensitive_env, which
+    # replaces the value of any sensitive name (KEY/TOKEN/SECRET/...) with
+    # "****" unless the harbor process environment holds the identical value.
+    # Values inherited from the host already match; recipe-configured
+    # overrides (e.g. DSH_MAX_TOKENS, which matches TOKEN) do not, so without
+    # this mirror Harbor would hand the agent "****", Number("****") would be
+    # NaN, and the dsh model adapter would fail to validate. Templates are
+    # already preserved by Harbor and must not be re-exported literally. The
+    # container still receives only the --ae declarations.
+    configured = config.get("agent_env")
+    if isinstance(configured, dict):
+        sanitized.update(
+            {
+                str(name): str(value)
+                for name, value in configured.items()
+                if _HARBOR_SENSITIVE_ENV_NAME.search(str(name))
+                and not _ENV_TEMPLATE.fullmatch(str(value))
+            }
+        )
     runtime_values = load_config(workspace / "evolve.yaml")["execution_runtime"] if workspace is not None else {}
     runtime = resolve_execution_runtime(execution_runtime_config(runtime_values), sanitized)
     return runtime.process_environment(sanitized)

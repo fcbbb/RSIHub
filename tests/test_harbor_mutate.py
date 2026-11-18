@@ -247,6 +247,54 @@ def test_codex_harbor_process_cannot_fall_back_to_host_openai_environment(
     assert module._harbor_process_env({"agent": "mini-swe-agent"}, host) == host
 
 
+def test_harbor_process_env_mirrors_configured_sensitive_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _harbor_runner_module()
+    monkeypatch.setattr(
+        module,
+        "resolve_execution_runtime",
+        lambda *_args, **_kwargs: SimpleNamespace(process_environment=lambda values: dict(values)),
+    )
+    monkeypatch.delenv("DSH_MAX_TOKENS", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    config = {
+        "agent": "dsh_container",
+        "agent_env": {"DSH_MAX_TOKENS": "32768", "STEP_LIMIT": "50"},
+    }
+
+    env = module._harbor_process_env(config, {"HOME": str(tmp_path)})
+
+    # Sensitive names are mirrored so Harbor keeps "${DSH_MAX_TOKENS}" instead
+    # of persisting "****"; non-sensitive values stay agent-only.
+    assert env["DSH_MAX_TOKENS"] == "32768"
+    assert "STEP_LIMIT" not in env
+    assert "DSH_MAX_TOKENS" in module._agent_env(config)
+
+
+def test_harbor_process_env_does_not_reexport_agent_templates(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module = _harbor_runner_module()
+    monkeypatch.setattr(
+        module,
+        "resolve_execution_runtime",
+        lambda *_args, **_kwargs: SimpleNamespace(process_environment=lambda values: dict(values)),
+    )
+    monkeypatch.delenv("CODEX_FORCE_AUTH_JSON", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    config = {"agent": "codex", "agent_env": {"DSH_MAX_TOKENS": "${DSH_MAX_TOKENS:-32768}"}}
+
+    env = module._harbor_process_env(config, {"HOME": str(tmp_path)})
+
+    # Harbor already preserves templates; exporting them literally would make
+    # the process env disagree with the value the agent receives.
+    assert "DSH_MAX_TOKENS" not in env
+    assert "CODEX_FORCE_AUTH_JSON" not in env
+
+
 def test_harbor_process_discovers_colima_socket(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     module = _harbor_runner_module()
     socket_path = tmp_path / ".colima" / "default" / "docker.sock"

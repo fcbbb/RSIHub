@@ -306,18 +306,14 @@ def _failure_signature(cases: list[Case], n_timeout: int) -> str:
     return "benchmark_failure"
 
 
-def _rotate_analysis_jobs(
-    jobs: list[TaskAnalysisJob], offset: int
-) -> list[TaskAnalysisJob]:
+def _rotate_analysis_jobs(jobs: list[TaskAnalysisJob], offset: int) -> list[TaskAnalysisJob]:
     if not jobs:
         return []
     offset %= len(jobs)
     return [*jobs[offset:], *jobs[:offset]]
 
 
-def _round_robin_by_signature(
-    jobs: list[TaskAnalysisJob], limit: int, generation: int = 0
-) -> list[TaskAnalysisJob]:
+def _round_robin_by_signature(jobs: list[TaskAnalysisJob], limit: int, generation: int = 0) -> list[TaskAnalysisJob]:
     buckets: dict[str, list[TaskAnalysisJob]] = {}
     for job in jobs:
         buckets.setdefault(job.signature, []).append(job)
@@ -329,8 +325,7 @@ def _round_robin_by_signature(
     # capped analysis does not keep favoring the same sorted prefix.
     per_signature = max(1, math.ceil(limit / len(buckets)))
     buckets = {
-        signature: _rotate_analysis_jobs(group, generation * per_signature)
-        for signature, group in buckets.items()
+        signature: _rotate_analysis_jobs(group, generation * per_signature) for signature, group in buckets.items()
     }
     signatures = sorted(buckets)
     signature_offset = (generation * limit) % len(signatures)
@@ -383,13 +378,9 @@ def _build_jobs(
                 signature=signature,
             )
         )
-    failures = _round_robin_by_signature(
-        [job for job in jobs if job.mode == "debug"], max_tasks, generation
-    )
+    failures = _round_robin_by_signature([job for job in jobs if job.mode == "debug"], max_tasks, generation)
     remaining = max_tasks - len(failures)
-    summaries = sorted(
-        (job for job in jobs if job.mode == "summary"), key=lambda job: job.task_name
-    )
+    summaries = sorted((job for job in jobs if job.mode == "summary"), key=lambda job: job.task_name)
     summary_offset = generation * remaining
     rotated_summaries = _rotate_analysis_jobs(summaries, summary_offset)
     return [*failures, *rotated_summaries[:remaining]]

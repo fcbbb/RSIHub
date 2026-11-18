@@ -110,6 +110,19 @@ class DshContainerAgent(BaseAgent):
 
         if "OPENAI_BASE_URL" not in env and "OPENAI_API_BASE" in env:
             env["OPENAI_BASE_URL"] = env["OPENAI_API_BASE"]
+        # The headless overlays compose llm-deepseek with
+        # ``apiKeyEnv: DEEPSEEK_API_KEY`` and read the endpoint from
+        # DEEPSEEK_BASE_URL. AHE recipes inject the gateway endpoint as
+        # OPENAI_* (the same names the candidate runtime uses), so derive the
+        # DEEPSEEK_* pair here; an explicit DEEPSEEK_* value wins.
+        if not env.get("DEEPSEEK_API_KEY"):
+            api_key = env.get("OPENAI_API_KEY")
+            if api_key:
+                env["DEEPSEEK_API_KEY"] = api_key
+        if not env.get("DEEPSEEK_BASE_URL"):
+            base_url = env.get("OPENAI_BASE_URL") or env.get("OPENAI_API_BASE")
+            if base_url:
+                env["DEEPSEEK_BASE_URL"] = base_url
         return env
 
     @override

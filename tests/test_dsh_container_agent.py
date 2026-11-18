@@ -85,12 +85,34 @@ def test_mutate_run_maps_env_and_writes_trajectory(tmp_path: Path) -> None:
     assert call["env"]["DSH_MODEL"] == "gpt-5.4-2026-03-05"
     assert call["env"]["OPENAI_API_KEY"] == "test-key"
     assert call["env"]["OPENAI_BASE_URL"] == "https://example.invalid/v1"
+    # The headless overlays authenticate through DEEPSEEK_* names.
+    assert call["env"]["DEEPSEEK_API_KEY"] == "test-key"
+    assert call["env"]["DEEPSEEK_BASE_URL"] == "https://example.invalid/v1"
     assert call["env"]["HTTPS_PROXY"] == "http://proxy.invalid"
     assert call["env"]["DSH_HOME"] == "/tmp/evolve-dsh-home"
 
     trajectory = json.loads((tmp_path / "logs" / "trajectory.json").read_text())
     assert trajectory == {"steps": [{"source": "agent", "message": "changed target"}]}
     assert context.metadata["dsh"]["session_id"] == "s-1"
+
+
+def test_explicit_deepseek_credentials_win_over_openai(tmp_path: Path) -> None:
+    agent = DshContainerAgent(
+        logs_dir=tmp_path / "logs",
+        model_name="openai/gpt-5.4-2026-03-05",
+        role="mutate",
+        extra_env={
+            "OPENAI_API_KEY": "openai-key",
+            "OPENAI_BASE_URL": "https://openai.invalid/v1",
+            "DEEPSEEK_API_KEY": "deepseek-key",
+            "DEEPSEEK_BASE_URL": "https://deepseek.invalid/v1",
+        },
+    )
+
+    env = agent._run_env()
+
+    assert env["DEEPSEEK_API_KEY"] == "deepseek-key"
+    assert env["DEEPSEEK_BASE_URL"] == "https://deepseek.invalid/v1"
 
 
 def test_analyst_run_uses_full_access_overlay(tmp_path: Path) -> None:

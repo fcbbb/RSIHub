@@ -483,11 +483,7 @@ def test_ahe_single_task_smoke_finds_late_timeout_with_event_citation(
         del args, kwargs
         assert set(input_files) == {"trace-evidence.json"}
         [filename] = input_paths
-        rows = [
-            json.loads(line)
-            for line in input_paths[filename].read_text().splitlines()
-            if line.strip()
-        ]
+        rows = [json.loads(line) for line in input_paths[filename].read_text().splitlines() if line.strip()]
         [match] = [row for row in rows if "TimeoutError" in row["event"]["observation"]]
         assert "exceeded its deadline" in match["event"]["observation"]
         response = f"ROOT CAUSE: verifier timeout. Evidence: trial=trial-timeout, record_index={match['record_index']}."

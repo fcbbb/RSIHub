@@ -765,8 +765,7 @@ def _harbor_process_env(
             {
                 str(name): str(value)
                 for name, value in configured.items()
-                if _HARBOR_SENSITIVE_ENV_NAME.search(str(name))
-                and not _ENV_TEMPLATE.fullmatch(str(value))
+                if _HARBOR_SENSITIVE_ENV_NAME.search(str(name)) and not _ENV_TEMPLATE.fullmatch(str(value))
             }
         )
     runtime_values = load_config(workspace / "evolve.yaml")["execution_runtime"] if workspace is not None else {}

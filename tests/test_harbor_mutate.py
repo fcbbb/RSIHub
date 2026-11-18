@@ -273,9 +273,7 @@ def test_harbor_process_env_mirrors_configured_sensitive_values(
     assert "DSH_MAX_TOKENS" in module._agent_env(config)
 
 
-def test_harbor_process_env_does_not_reexport_agent_templates(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_harbor_process_env_does_not_reexport_agent_templates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     module = _harbor_runner_module()
     monkeypatch.setattr(
         module,
